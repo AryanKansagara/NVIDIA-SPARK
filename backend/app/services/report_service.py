@@ -8,6 +8,7 @@ from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HeritageService
 from app.services.engine.report_engine import EngineInput, ReportEngine
 from app.services.geocoding.service import GeocodingService
+from app.services.synthesis.service import SynthesisService
 
 
 class ReportService:
@@ -18,6 +19,7 @@ class ReportService:
         self.flood_service = FloodService(settings)
         self.development_service = DevelopmentService()
         self.engine = ReportEngine(settings)
+        self.synthesis = SynthesisService(settings)
 
     async def geocode_address(self, address: str) -> GeocodeResponse:
         location = await self.geocoder.geocode(address)
@@ -133,7 +135,15 @@ class ReportService:
                 },
             ),
             key_numbers=engine_output.key_numbers,
-            summary_text=None,
+            summary_text=await self.synthesis.synthesize(
+                address=payload.address,
+                list_price=payload.list_price,
+                buyer_profile=payload.buyer_profile,
+                engine_output=engine_output,
+                heritage=heritage,
+                flood=flood,
+                development=development,
+            ),
         )
 
 

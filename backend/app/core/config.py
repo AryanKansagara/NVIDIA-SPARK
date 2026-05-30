@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
     flood_risk_annual_loading: int = 3500
+    nim_base_url: str = "http://localhost:8080/v1"
+    nim_model: str = "meta/llama-3.1-8b-instruct"
+    nim_enabled: bool = True
+    nim_timeout_seconds: float = 45.0
     trca_flood_query_url: str = (
         "https://services6.arcgis.com/jr7MHa3BWLD2qqOB/arcgis/rest/services/"
         "Floodline_TRCA_Polygon/FeatureServer/0/query"
