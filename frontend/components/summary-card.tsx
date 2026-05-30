@@ -16,7 +16,7 @@ function currency(value: number) {
 
 export function SummaryCard({ report }: SummaryCardProps) {
   return (
-    <Panel className="h-full bg-ink text-white">
+    <Panel className="h-full bg-ink/90 text-white">
       <div className="space-y-6">
         <div className="space-y-3">
           <Pill tone="yellow">Preview Summary</Pill>

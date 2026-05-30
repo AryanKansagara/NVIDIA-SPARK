@@ -7,6 +7,7 @@ from app.services.data_sources.development import DevelopmentService
 from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HeritageService
 from app.services.engine.report_engine import EngineInput, ReportEngine
+from app.rag import ReportSignals, build_query_from_report
 from app.services.geocoding.service import GeocodingService
 from app.services.rag.service import RAGService
 from app.services.synthesis.service import SynthesisService
@@ -103,11 +104,18 @@ class ReportService:
         )
 
         law_context: list[str] = []
-        if self.settings.rag_enabled and self.rag.is_ready():
-            top_flags = [f.title for f in engine_output.flags[:2]]
-            rag_query = f"{payload.address} {' '.join(top_flags)} land law Toronto Ontario property purchase"
+        if self.rag.is_ready():
+            signals = ReportSignals(
+                is_first_time_buyer=payload.buyer_profile == "first_time",
+                has_heritage_flag=heritage.status != "no_match",
+                has_flood_flag=flood.in_flood_zone,
+                has_development_pressure=development.intensity in ("high", "medium"),
+                down_payment_pct=payload.down_payment_percent,
+                list_price=payload.list_price,
+            )
+            rag_query = build_query_from_report(payload.address, payload.list_price, signals)
             try:
-                law_context = await self.rag.query(rag_query)
+                law_context = await self.rag.query(rag_query, signals=signals)
             except Exception:
                 pass
 
