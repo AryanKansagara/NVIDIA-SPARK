@@ -80,9 +80,11 @@ class ReportEngine:
             + (17000 if payload.development.intensity == "high" else 7000 if payload.development.intensity == "medium" else 0)
         )
 
+        down_payment = round(payload.list_price * (payload.down_payment_percent / 100))
         transit_dividend = self._transit_dividend(payload.address)
         total_cost = round(
-            land_transfer_tax_total
+            down_payment
+            + land_transfer_tax_total
             + property_tax_10y
             + mortgage_base
             + risk_adjustments
@@ -100,7 +102,8 @@ class ReportEngine:
             ScenarioCost(
                 scenario="bull",
                 total_cost=round(
-                    land_transfer_tax_total
+                    down_payment
+                    + land_transfer_tax_total
                     + property_tax_10y
                     + mortgage_bull
                     + risk_adjustments
@@ -111,7 +114,8 @@ class ReportEngine:
             ScenarioCost(
                 scenario="bear",
                 total_cost=round(
-                    land_transfer_tax_total
+                    down_payment
+                    + land_transfer_tax_total
                     + property_tax_10y
                     + mortgage_bear
                     + risk_adjustments

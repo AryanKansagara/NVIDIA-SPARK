@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     nim_model: str = "meta/llama-3.1-8b-instruct"
     nim_enabled: bool = True
     nim_timeout_seconds: float = 45.0
+    rag_enabled: bool = True
+    rag_embedding_model: str = "nvidia/llama-3.2-nv-embedqa-1b-v2"
+    rag_vector_store_path: str = "data/vector_store"
+    rag_land_laws_dir: str = "data/land_laws"
+    rag_n_results: int = 3
+    rag_chunk_size: int = 800
+    rag_chunk_overlap: int = 100
     trca_flood_query_url: str = (
         "https://services6.arcgis.com/jr7MHa3BWLD2qqOB/arcgis/rest/services/"
         "Floodline_TRCA_Polygon/FeatureServer/0/query"

@@ -8,6 +8,7 @@ from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HeritageService
 from app.services.engine.report_engine import EngineInput, ReportEngine
 from app.services.geocoding.service import GeocodingService
+from app.services.rag.service import RAGService
 from app.services.synthesis.service import SynthesisService
 
 
@@ -19,6 +20,7 @@ class ReportService:
         self.flood_service = FloodService(settings)
         self.development_service = DevelopmentService()
         self.engine = ReportEngine(settings)
+        self.rag = RAGService(settings)
         self.synthesis = SynthesisService(settings)
 
     async def geocode_address(self, address: str) -> GeocodeResponse:
@@ -100,6 +102,15 @@ class ReportService:
             )
         )
 
+        law_context: list[str] = []
+        if self.settings.rag_enabled and self.rag.is_ready():
+            top_flags = [f.title for f in engine_output.flags[:2]]
+            rag_query = f"{payload.address} {' '.join(top_flags)} land law Toronto Ontario property purchase"
+            try:
+                law_context = await self.rag.query(rag_query)
+            except Exception:
+                pass
+
         return ReportResponse(
             property=ResolvedProperty(
                 address=location.address,
@@ -143,6 +154,7 @@ class ReportService:
                 heritage=heritage,
                 flood=flood,
                 development=development,
+                law_context=law_context,
             ),
         )
 

@@ -11,9 +11,9 @@ You are Meridian's synthesis agent. You receive JSON about a Toronto property's 
 
 Paragraph 1 (verdict): State the true 10-year cost, how far above list price that is as a percentage, and the single most important risk flag.
 Paragraph 2 (cost drivers): Explain the 2 largest costs beyond the mortgage in plain English, using the exact dollar figures provided.
-Paragraph 3 (action): Give 2 specific steps this buyer should take before closing, based on their profile and the flags present.
+Paragraph 3 (action): Give 2 specific steps this buyer should take before closing, based on their profile and the flags present. If relevant land-law excerpts are provided, reference specific legal obligations the buyer should be aware of.
 
-Rules: use only numbers from the input. No jargon, no methodology, no mention of data sources. Max 250 words total.\
+Rules: use only numbers from the input. No jargon, no methodology, no mention of data sources. Max 280 words total.\
 """
 
 
@@ -30,12 +30,14 @@ class SynthesisService:
         heritage: HeritageEvidence,
         flood: FloodEvidence,
         development: DevelopmentEvidence,
+        law_context: list[str] | None = None,
     ) -> str | None:
         if not self.settings.nim_enabled:
             return None
         try:
             return await self._call_nim(
-                address, list_price, buyer_profile, engine_output, heritage, flood, development
+                address, list_price, buyer_profile, engine_output, heritage, flood, development,
+                law_context or [],
             )
         except Exception:
             return None
@@ -49,6 +51,7 @@ class SynthesisService:
         heritage: HeritageEvidence,
         flood: FloodEvidence,
         development: DevelopmentEvidence,
+        law_context: list[str],
     ) -> str:
         kn = engine_output.key_numbers
         above_list_pct = round((engine_output.total_cost - list_price) / list_price * 100)
@@ -59,6 +62,7 @@ class SynthesisService:
             "buyer_profile": buyer_profile,
             "true_10_year_cost": engine_output.total_cost,
             "above_list_percent": above_list_pct,
+            **({"land_law_excerpts": law_context} if law_context else {}),
             "key_numbers": {
                 "land_transfer_tax": kn.land_transfer_tax_total,
                 "property_tax_10y": kn.property_tax_10y,
