@@ -17,10 +17,12 @@ class Settings(BaseSettings):
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
     flood_risk_annual_loading: int = 3500
-    nim_base_url: str = "http://localhost:8080/v1"
-    nim_model: str = "meta/llama-3.1-8b-instruct"
+    nim_local_url: str = "http://localhost:8080/v1"   # local NIM container (primary)
+    nim_base_url: str = "https://integrate.api.nvidia.com/v1"  # hosted API (fallback)
+    nim_model: str = "nvidia/nemotron-nano-12b-v2-vl"
     nim_enabled: bool = True
-    nim_timeout_seconds: float = 45.0
+    nim_timeout_seconds: float = 60.0
+    nim_api_key: str = ""
     rag_enabled: bool = True
     rag_embedding_model: str = "nvidia/llama-3.2-nv-embedqa-1b-v2"
     rag_vector_store_path: str = "data/vector_store"
@@ -39,7 +41,7 @@ class Settings(BaseSettings):
     gpu_enabled: bool = True
     monte_carlo_n_sims: int = 10_000
     # LLM upgrade
-    nemotron_model: str = "nvidia/nemotron-nano-4b-instruct"
+    nemotron_model: str = "nvidia/nemotron-nano-12b-v2-vl"
     nemo_retriever_enabled: bool = False
     nemo_retriever_url: str = ""
 

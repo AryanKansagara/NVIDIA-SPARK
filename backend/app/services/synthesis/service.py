@@ -41,7 +41,9 @@ class SynthesisService:
                 address, list_price, buyer_profile, engine_output, heritage, flood, development,
                 law_context or [], monte_carlo,
             )
-        except Exception:
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("NIM synthesis failed: %s", exc, exc_info=True)
             return None
 
     async def _call_nim(
@@ -96,8 +98,7 @@ class SynthesisService:
                 "mean": monte_carlo.mean,
             }
 
-        # Prefer Nemotron if NIM is serving it; fall back to configured nim_model
-        model = self.settings.nemotron_model if self.settings.nim_enabled else self.settings.nim_model
+        model = self.settings.nim_model
 
         payload = {
             "model": model,
@@ -110,10 +111,26 @@ class SynthesisService:
             "stream": False,
         }
 
+        # Try local NIM container first; fall back to hosted NVIDIA API
         async with httpx.AsyncClient(timeout=self.settings.nim_timeout_seconds) as client:
+            try:
+                resp = await client.post(
+                    f"{self.settings.nim_local_url}/chat/completions",
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"].strip()
+            except Exception:
+                pass  # local container not running — fall through to hosted API
+
+            headers = {}
+            if self.settings.nim_api_key:
+                headers["Authorization"] = f"Bearer {self.settings.nim_api_key}"
+
             resp = await client.post(
                 f"{self.settings.nim_base_url}/chat/completions",
                 json=payload,
+                headers=headers,
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()

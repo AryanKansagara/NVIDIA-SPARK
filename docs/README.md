@@ -38,7 +38,8 @@ That means the LLM should not invent numbers, mortgage assumptions, or financial
 - [mvp-spec.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/mvp-spec.md)
 - [architecture.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/architecture.md)
 - [tech-stack.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/tech-stack.md)
-- [data-sources.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/data-sources.md)
+- [data-sources.md](data-sources.md)
+- [frontend-parameters.md](frontend-parameters.md) — every parameter used to generate the numbers shown on the frontend
 
 ## GPU Pipeline Upgrade
 

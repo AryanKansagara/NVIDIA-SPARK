@@ -29,11 +29,22 @@ export type MonteCarloDistribution = {
   elapsedMs: number | null;
 };
 
+export type CommunityInsight = {
+  headline: string;
+  medianEstimate: number;
+  typicalRangeLow: number;
+  typicalRangeHigh: number;
+  pricePerSqftEstimate: number;
+  trend: "rising" | "stable" | "cooling";
+  notes: string[];
+};
+
 export type MapGeometry = {
   propertyLat: number;
   propertyLon: number;
   floodPolygonGeojson: object | null;
   devPressureRadiusM: number;
+  communityInsights: CommunityInsight | null;
 };
 
 export type MeridianReport = {

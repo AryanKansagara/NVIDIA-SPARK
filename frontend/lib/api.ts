@@ -55,6 +55,15 @@ type BackendReport = {
     property_lon: number;
     flood_polygon_geojson: object | null;
     dev_pressure_radius_m: number;
+    community_insights: {
+      headline: string;
+      median_estimate: number;
+      typical_range_low: number;
+      typical_range_high: number;
+      price_per_sqft_estimate: number;
+      trend: "rising" | "stable" | "cooling";
+      notes: string[];
+    } | null;
   } | null;
 };
 
@@ -109,6 +118,17 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
         propertyLon: backend.map_geometry.property_lon,
         floodPolygonGeojson: backend.map_geometry.flood_polygon_geojson,
         devPressureRadiusM: backend.map_geometry.dev_pressure_radius_m,
+        communityInsights: backend.map_geometry.community_insights
+          ? {
+              headline: backend.map_geometry.community_insights.headline,
+              medianEstimate: backend.map_geometry.community_insights.median_estimate,
+              typicalRangeLow: backend.map_geometry.community_insights.typical_range_low,
+              typicalRangeHigh: backend.map_geometry.community_insights.typical_range_high,
+              pricePerSqftEstimate: backend.map_geometry.community_insights.price_per_sqft_estimate,
+              trend: backend.map_geometry.community_insights.trend,
+              notes: backend.map_geometry.community_insights.notes,
+            }
+          : null,
       }
     : null;
 

@@ -11,9 +11,9 @@ class ReportRequest(BaseModel):
     address: str = Field(min_length=3)
     list_price: float = Field(gt=0)
     buyer_profile: BuyerProfile
-    down_payment_percent: float = Field(ge=5, le=100)
-    mortgage_rate: float = Field(gt=0, le=30)
-    amortization_years: int = Field(ge=5, le=35)
+    down_payment_percent: float = Field(default=20.0, ge=5, le=100)
+    mortgage_rate: float = Field(default=5.5, gt=0, le=30)
+    amortization_years: int = Field(default=25, ge=5, le=35)
 
 
 class ResolvedProperty(BaseModel):
@@ -65,11 +65,22 @@ class MonteCarloResult(BaseModel):
     elapsed_ms: float | None = None
 
 
+class CommunityInsight(BaseModel):
+    headline: str
+    median_estimate: int
+    typical_range_low: int
+    typical_range_high: int
+    price_per_sqft_estimate: int
+    trend: Literal["rising", "stable", "cooling"]
+    notes: list[str]
+
+
 class MapGeometry(BaseModel):
     property_lat: float
     property_lon: float
     flood_polygon_geojson: dict | None = None
     dev_pressure_radius_m: int = 500
+    community_insights: CommunityInsight | None = None
 
 
 class ReportResponse(BaseModel):

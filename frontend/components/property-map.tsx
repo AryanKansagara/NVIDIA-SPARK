@@ -63,6 +63,56 @@ export function PropertyMap({ geometry }: Props) {
         .addTo(map)
         .bindPopup("~400 m TTC walkability ring");
 
+      // Surrounding community pricing — clickable insight marker
+      const ci = geometry.communityInsights;
+      if (ci) {
+        const fmt = (v: number) =>
+          new Intl.NumberFormat("en-CA", {
+            style: "currency",
+            currency: "CAD",
+            maximumFractionDigits: 0,
+          }).format(v);
+        const trendBadge =
+          ci.trend === "rising"
+            ? '<span style="color:#E16B47;font-weight:600;">▲ Rising</span>'
+            : ci.trend === "cooling"
+              ? '<span style="color:#2B6A57;font-weight:600;">▼ Cooling</span>'
+              : '<span style="color:#B99239;font-weight:600;">▬ Stable</span>';
+
+        const popupHtml = `
+          <div style="min-width:230px;max-width:280px;font-family:inherit;">
+            <div style="font-weight:700;font-size:13px;color:#10212B;margin-bottom:4px;">
+              💲 ${ci.headline}
+            </div>
+            <div style="font-size:12px;color:#10212B;margin-bottom:6px;">
+              Median ≈ <b>${fmt(ci.medianEstimate)}</b> &nbsp;|&nbsp; ${trendBadge}<br/>
+              Typical range: ${fmt(ci.typicalRangeLow)} – ${fmt(ci.typicalRangeHigh)}<br/>
+              ~$${ci.pricePerSqftEstimate.toLocaleString("en-CA")} / sq ft
+            </div>
+            <ul style="margin:0;padding-left:16px;font-size:11px;color:#41555C;line-height:1.5;">
+              ${ci.notes.map((n) => `<li>${n}</li>`).join("")}
+            </ul>
+          </div>`;
+
+        // Custom $ pin, offset slightly NE of the property so both are visible.
+        const dollarIcon = L.divIcon({
+          className: "",
+          html:
+            '<div style="background:#E16B47;color:#fff;width:30px;height:30px;border-radius:50%;' +
+            "display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;" +
+            'border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;">$</div>',
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        });
+
+        L.marker([geometry.propertyLat + 0.0012, geometry.propertyLon + 0.0016], {
+          icon: dollarIcon,
+          title: "Community pricing insights",
+        })
+          .addTo(map)
+          .bindPopup(popupHtml, { maxWidth: 300 });
+      }
+
       // Flood polygon overlay
       if (geometry.floodPolygonGeojson) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +141,7 @@ export function PropertyMap({ geometry }: Props) {
         <p className="text-sm text-slate mt-0.5">
           Property pin · Development pressure ({geometry.devPressureRadiusM} m) ·
           TTC walkability ring{geometry.floodPolygonGeojson ? " · Flood polygon" : ""}
+          {geometry.communityInsights ? " · 💲 Click the orange pin for community pricing" : ""}
         </p>
       </div>
       {/* Leaflet CSS */}
