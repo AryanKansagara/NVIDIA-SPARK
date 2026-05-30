@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import httpx
+import time
 
 from app.core.config import Settings
 
@@ -34,6 +35,7 @@ class GeocodingService:
         headers = {"User-Agent": self.settings.geocoder_user_agent}
 
         async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
+            time.sleep(1)  # Rate limiting
             response = await client.get(
                 self.settings.geocoder_base_url,
                 params=params,
