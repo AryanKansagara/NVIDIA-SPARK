@@ -77,12 +77,12 @@ class ReportService:
         flood = await self.flood_service.lookup(location)
         development = await self.development_service.lookup(location)
 
-        if heritage.source == "heuristic-preview":
-            warnings.append("Heritage adapter is currently a preview heuristic and should be replaced with the Toronto Heritage Register integration.")
-        if flood.source == "heuristic-preview":
-            warnings.append("Flood adapter is currently a preview heuristic and should be replaced with a live TRCA spatial query.")
-        if development.source == "heuristic-preview":
-            warnings.append("Development adapter is currently a preview heuristic and should be replaced with a live Toronto dataset query.")
+        if "heuristic" in heritage.source:
+            warnings.append("Heritage data fell back to heuristic — CKAN live dataset unavailable.")
+        if "heuristic" in flood.source:
+            warnings.append("Flood data fell back to heuristic — TRCA ArcGIS service unavailable.")
+        if "heuristic" in development.source:
+            warnings.append("Development pressure fell back to heuristic — CKAN live dataset unavailable.")
 
         engine_output = self.engine.build(
             EngineInput(
