@@ -2,11 +2,11 @@ import asyncio
 import hashlib
 from pathlib import Path
 
-import chromadb
 import httpx
 from pypdf import PdfReader
 
 from app.core.config import Settings
+from app.services.rag.store import VectorStore
 
 
 def _chunk_text(text: str, size: int, overlap: int) -> list[str]:
@@ -43,7 +43,7 @@ async def _embed_batch(texts: list[str], settings: Settings) -> list[list[float]
         return [item["embedding"] for item in data]
 
 
-async def ingest_pdf(path: Path, settings: Settings, collection: chromadb.Collection) -> int:
+async def ingest_pdf(path: Path, settings: Settings, store: VectorStore) -> int:
     text = _extract_pdf_text(path)
     chunks = _chunk_text(text, settings.rag_chunk_size, settings.rag_chunk_overlap)
     if not chunks:
@@ -58,9 +58,8 @@ async def ingest_pdf(path: Path, settings: Settings, collection: chromadb.Collec
         batch_embeddings = await _embed_batch(chunks[start : start + 32], settings)
         all_embeddings.extend(batch_embeddings)
 
-    # Upsert so re-running on the same file is idempotent
     await asyncio.to_thread(
-        collection.upsert,
+        store.upsert,
         ids=ids,
         documents=chunks,
         embeddings=all_embeddings,
@@ -69,7 +68,7 @@ async def ingest_pdf(path: Path, settings: Settings, collection: chromadb.Collec
     return len(chunks)
 
 
-async def ingest_directory(dir_path: Path, settings: Settings, collection: chromadb.Collection) -> int:
+async def ingest_directory(dir_path: Path, settings: Settings, store: VectorStore) -> int:
     pdfs = sorted(dir_path.glob("*.pdf"))
     if not pdfs:
         print(f"No PDFs found in {dir_path}")
@@ -77,7 +76,7 @@ async def ingest_directory(dir_path: Path, settings: Settings, collection: chrom
     total = 0
     for pdf_path in pdfs:
         print(f"  {pdf_path.name}...", end=" ", flush=True)
-        n = await ingest_pdf(pdf_path, settings, collection)
+        n = await ingest_pdf(pdf_path, settings, store)
         print(f"{n} chunks")
         total += n
     return total
