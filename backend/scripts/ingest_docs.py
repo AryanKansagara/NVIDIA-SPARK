@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ingest land-law PDFs into the ChromaDB vector store.
+Ingest land-law PDFs into the vector store.
 
 Run from backend/:
     python scripts/ingest_docs.py
@@ -30,8 +30,8 @@ async def main() -> None:
     print()
 
     rag = RAGService(settings)
-    total = await ingest_directory(law_dir, settings, rag.collection())
-    print(f"\nDone. {total} chunks indexed. Collection size: {rag.collection().count()}")
+    total = await ingest_directory(law_dir, settings, rag.store())
+    print(f"\nDone. {total} chunks indexed. Store size: {rag.store().count()}")
 
 
 if __name__ == "__main__":

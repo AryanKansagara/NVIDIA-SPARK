@@ -1,30 +1,22 @@
 import asyncio
 from pathlib import Path
 
-import chromadb
 import httpx
 
 from app.core.config import Settings
-
-_COLLECTION_NAME = "land_laws"
+from app.services.rag.store import VectorStore
 
 
 class RAGService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        store_path = Path(settings.rag_vector_store_path)
-        store_path.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(path=str(store_path))
-        self._collection = self._client.get_or_create_collection(
-            name=_COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
+        self._store = VectorStore(Path(settings.rag_vector_store_path))
 
     def is_ready(self) -> bool:
-        return self._collection.count() > 0
+        return self._store.count() > 0
 
-    def collection(self) -> chromadb.Collection:
-        return self._collection
+    def store(self) -> VectorStore:
+        return self._store
 
     async def query(self, text: str, n_results: int | None = None) -> list[str]:
         if not self.is_ready():
@@ -32,9 +24,9 @@ class RAGService:
         n = n_results or self.settings.rag_n_results
         embedding = await self._embed(text)
         results = await asyncio.to_thread(
-            self._collection.query,
+            self._store.query,
             query_embeddings=[embedding],
-            n_results=min(n, self._collection.count()),
+            n_results=n,
         )
         return [doc for doc in results.get("documents", [[]])[0] if doc]
 
