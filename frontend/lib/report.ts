@@ -20,6 +20,22 @@ export type BreakdownPoint = {
   fill: string;
 };
 
+export type MonteCarloDistribution = {
+  p10: number;
+  p50: number;
+  p90: number;
+  mean: number;
+  trajectoriesSampled: number;
+  elapsedMs: number | null;
+};
+
+export type MapGeometry = {
+  propertyLat: number;
+  propertyLon: number;
+  floodPolygonGeojson: object | null;
+  devPressureRadiusM: number;
+};
+
 export type MeridianReport = {
   summary: string;
   trueCost: number;
@@ -39,6 +55,8 @@ export type MeridianReport = {
     insuredPremium: number;
     baseMortgageCost10y: number;
   };
+  monteCarlo: MonteCarloDistribution | null;
+  mapGeometry: MapGeometry | null;
 };
 
 const PROPERTY_TAX_RATE = 0.00767311;
@@ -317,5 +335,7 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
       insuredPremium: currencyRounding(insuredPremium),
       baseMortgageCost10y: currencyRounding(baseMortgage),
     },
+    monteCarlo: null,
+    mapGeometry: null,
   };
 }

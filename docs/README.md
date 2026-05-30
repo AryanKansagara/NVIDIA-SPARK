@@ -40,6 +40,12 @@ That means the LLM should not invent numbers, mortgage assumptions, or financial
 - [tech-stack.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/tech-stack.md)
 - [data-sources.md](/C:/Users/aryan/Desktop/Projects/Nvidia%20hackathonb/NVIDIA-SPARK/docs/data-sources.md)
 
+## GPU Pipeline Upgrade
+
+After the initial MVP a major upgrade was applied covering DuckDB/Parquet data pipeline, RAPIDS GPU acceleration, CuPy Monte Carlo simulation, Nemotron 3 Nano via NIM, NemoRetriever RAG, and the interactive Leaflet map. Full implementation notes are in:
+
+- [gpu-pipeline-upgrade/](gpu-pipeline-upgrade/README.md)
+
 ## Recommended Use
 
 Use these docs as the baseline for:

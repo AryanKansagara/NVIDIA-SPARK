@@ -1,13 +1,17 @@
 "use client";
 
 import { type ComponentType, type FormEvent, type ReactNode, useState } from "react";
-import { Home, Percent, ReceiptText, UserRound } from "lucide-react";
+import { Home, Loader2, ReceiptText, RefreshCw, UserRound } from "lucide-react";
 import { Panel } from "@/components/ui/panel";
 import type { BuyerProfile, MeridianFormState } from "@/lib/report";
+import type { PipelineStatus } from "@/lib/pipeline-api";
 
 type InputCardProps = {
   initialValues: MeridianFormState;
   onSubmit: (values: MeridianFormState) => void;
+  onRefreshPipeline?: () => void;
+  pipelineStatus?: PipelineStatus | null;
+  isRefreshing?: boolean;
 };
 
 type FieldProps = {
@@ -36,7 +40,13 @@ function Field({ label, hint, icon: Icon, children }: FieldProps) {
   );
 }
 
-export function InputCard({ initialValues, onSubmit }: InputCardProps) {
+export function InputCard({
+  initialValues,
+  onSubmit,
+  onRefreshPipeline,
+  pipelineStatus,
+  isRefreshing = false,
+}: InputCardProps) {
   const [form, setForm] = useState(initialValues);
 
   function update<K extends keyof MeridianFormState>(key: K, value: MeridianFormState[K]) {
@@ -106,68 +116,42 @@ export function InputCard({ initialValues, onSubmit }: InputCardProps) {
               <option value="downsizer">Downsizer</option>
             </select>
           </Field>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Field
-              label="Down Payment"
-              hint="Percent of purchase price."
-              icon={Percent}
-            >
-              <input
-                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
-                type="number"
-                min={5}
-                max={100}
-                step={1}
-                value={form.downPaymentPercent}
-                onChange={(event) =>
-                  update("downPaymentPercent", Number(event.target.value))
-                }
-              />
-            </Field>
-            <Field
-              label="Rate"
-              hint="Starting mortgage rate."
-              icon={Percent}
-            >
-              <input
-                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
-                type="number"
-                min={0.5}
-                max={20}
-                step={0.01}
-                value={form.mortgageRate}
-                onChange={(event) => update("mortgageRate", Number(event.target.value))}
-              />
-            </Field>
-            <Field
-              label="Amortization"
-              hint="Years used for the payment model."
-              icon={Percent}
-            >
-              <input
-                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
-                type="number"
-                min={5}
-                max={35}
-                step={1}
-                value={form.amortizationYears}
-                onChange={(event) =>
-                  update("amortizationYears", Number(event.target.value))
-                }
-              />
-            </Field>
-          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-mist transition hover:bg-[#1C3541]"
-          >
-            Recalculate Preview
-          </button>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
-            Frontend preview only. Live city data wiring comes next.
-          </p>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-mist transition hover:bg-[#1C3541]"
+            >
+              Generate Report
+            </button>
+            {onRefreshPipeline && (
+              <button
+                type="button"
+                disabled={isRefreshing}
+                onClick={onRefreshPipeline}
+                className="flex items-center gap-2 rounded-full border border-[#D7E7E2] bg-mist/60 px-5 py-3 text-sm font-semibold text-moss transition hover:bg-mist disabled:opacity-60"
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {isRefreshing ? "Refreshing…" : "Refresh Live Data"}
+              </button>
+            )}
+          </div>
+          {pipelineStatus && (
+            <p className="text-xs text-slate">
+              Data refreshed{" "}
+              {pipelineStatus.refreshedAt.toLocaleTimeString("en-CA", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}{" "}
+              · {pipelineStatus.heritageRows.toLocaleString()} heritage ·{" "}
+              {pipelineStatus.developmentRows.toLocaleString()} development
+            </p>
+          )}
         </div>
       </form>
     </Panel>

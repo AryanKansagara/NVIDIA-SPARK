@@ -56,6 +56,22 @@ class KeyNumbers(BaseModel):
     transit_dividend: int
 
 
+class MonteCarloResult(BaseModel):
+    p10: int
+    p50: int
+    p90: int
+    mean: int
+    trajectories_sampled: int
+    elapsed_ms: float | None = None
+
+
+class MapGeometry(BaseModel):
+    property_lat: float
+    property_lon: float
+    flood_polygon_geojson: dict | None = None
+    dev_pressure_radius_m: int = 500
+
+
 class ReportResponse(BaseModel):
     property: ResolvedProperty
     true_10_year_cost: int
@@ -66,3 +82,5 @@ class ReportResponse(BaseModel):
     evidence_summary: EvidenceSummary
     key_numbers: KeyNumbers
     summary_text: str | None = None
+    monte_carlo: MonteCarloResult | None = None
+    map_geometry: MapGeometry | None = None

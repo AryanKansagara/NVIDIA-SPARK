@@ -2,12 +2,20 @@ from functools import lru_cache
 
 from app.core.config import Settings, get_settings
 from app.schemas.debug import DevelopmentDebugResponse, FloodDebugResponse, GeocodeResponse, HeritageDebugResponse
-from app.schemas.report import EvidenceSummary, ReportRequest, ReportResponse, ResolvedProperty
+from app.schemas.report import (
+    EvidenceSummary,
+    MapGeometry,
+    MonteCarloResult,
+    ReportRequest,
+    ReportResponse,
+    ResolvedProperty,
+)
 from app.services.data_sources.development import DevelopmentService
 from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HeritageService
 from app.services.engine.report_engine import EngineInput, ReportEngine
 from app.services.geocoding.service import GeocodingService
+from app.services.gpu.monte_carlo import MonteCarloSimulator
 from app.services.rag.service import RAGService
 from app.services.synthesis.service import SynthesisService
 
@@ -22,6 +30,10 @@ class ReportService:
         self.engine = ReportEngine(settings)
         self.rag = RAGService(settings)
         self.synthesis = SynthesisService(settings)
+        self.monte_carlo = MonteCarloSimulator(
+            n_sims=settings.monte_carlo_n_sims,
+            gpu_enabled=settings.gpu_enabled,
+        )
 
     async def geocode_address(self, address: str) -> GeocodeResponse:
         location = await self.geocoder.geocode(address)
@@ -102,6 +114,35 @@ class ReportService:
             )
         )
 
+        # Monte Carlo simulation — runs async, uses GPU if available
+        dev_density_score = min(development.application_count_500m / 20.0, 1.0)
+        assessed_value = payload.list_price * self.settings.assessed_value_factor
+        mc_result_raw = await self.monte_carlo.run(
+            base_cost=engine_output.total_cost,
+            property_tax_base=assessed_value * self.settings.property_tax_rate,
+            flood_zone=flood.in_flood_zone,
+            dev_density_score=dev_density_score,
+            assessed_value=assessed_value,
+            base_tax_rate=self.settings.property_tax_rate,
+            tax_growth_base=self.settings.property_tax_growth_rate,
+        )
+        monte_carlo = MonteCarloResult(
+            p10=mc_result_raw.p10,
+            p50=mc_result_raw.p50,
+            p90=mc_result_raw.p90,
+            mean=mc_result_raw.mean,
+            trajectories_sampled=mc_result_raw.trajectories_sampled,
+            elapsed_ms=mc_result_raw.elapsed_ms,
+        )
+
+        # Map geometry
+        map_geometry = MapGeometry(
+            property_lat=location.latitude,
+            property_lon=location.longitude,
+            flood_polygon_geojson=flood.polygon_geojson,
+            dev_pressure_radius_m=500,
+        )
+
         law_context: list[str] = []
         if self.settings.rag_enabled and self.rag.is_ready():
             top_flags = [f.title for f in engine_output.flags[:2]]
@@ -146,6 +187,8 @@ class ReportService:
                 },
             ),
             key_numbers=engine_output.key_numbers,
+            monte_carlo=monte_carlo,
+            map_geometry=map_geometry,
             summary_text=await self.synthesis.synthesize(
                 address=payload.address,
                 list_price=payload.list_price,
@@ -155,6 +198,7 @@ class ReportService:
                 flood=flood,
                 development=development,
                 law_context=law_context,
+                monte_carlo=monte_carlo,
             ),
         )
 

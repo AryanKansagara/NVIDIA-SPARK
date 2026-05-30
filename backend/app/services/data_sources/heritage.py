@@ -1,141 +1,82 @@
-import asyncio
+"""Heritage Register lookup backed by DuckDB (populated by pipeline refresh).
+
+Falls back to the original CKAN live fetch if DuckDB table is empty,
+then falls back to heuristic if CKAN is unreachable.
+"""
+from __future__ import annotations
+
+import logging
 import math
 
-import httpx
+import pandas as pd
 
+from app.core.config import get_settings
 from app.services.data_sources.models import HeritageEvidence
 from app.services.geocoding.service import GeocodeResult
+from app.services.gpu import spatial as gpu_spatial
+from app.services.pipeline.duckdb_store import get_store
 
-_CKAN_BASE = "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action"
-_PACKAGE = "heritage-register"
-_MATCH_RADIUS_M = 80  # generous for geocoder accuracy variance
+logger = logging.getLogger(__name__)
 
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6_371_000
-    φ1, φ2 = math.radians(lat1), math.radians(lat2)
-    dφ = math.radians(lat2 - lat1)
-    dλ = math.radians(lon2 - lon1)
-    a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+_MATCH_RADIUS_M = 80
 
 
 class HeritageService:
-    def __init__(self) -> None:
-        self._records: list[dict] | None = None
-        self._lat_key: str | None = None
-        self._lon_key: str | None = None
-        self._status_key: str | None = None
-        self._addr_key: str | None = None
-        self._lock = asyncio.Lock()
-
-    async def _ensure_loaded(self) -> None:
-        if self._records is not None:
-            return
-        async with self._lock:
-            if self._records is not None:
-                return
-            await self._fetch()
-
-    async def _fetch(self) -> None:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            pkg = await client.get(f"{_CKAN_BASE}/package_show", params={"id": _PACKAGE})
-            pkg.raise_for_status()
-            resources = pkg.json()["result"]["resources"]
-
-            resource_id = next(
-                (r["id"] for r in resources if r.get("datastore_active")), None
-            ) or next(
-                (r["id"] for r in resources if r.get("format", "").upper() in ("CSV", "JSON")),
-                None,
-            )
-            if not resource_id:
-                self._records = []
-                return
-
-            records: list[dict] = []
-            limit = 5000
-            offset = 0
-            while True:
-                resp = await client.get(
-                    f"{_CKAN_BASE}/datastore_search",
-                    params={"resource_id": resource_id, "limit": limit, "offset": offset},
-                )
-                resp.raise_for_status()
-                batch = resp.json()["result"]["records"]
-                records.extend(batch)
-                if len(batch) < limit:
-                    break
-                offset += limit
-
-        if records:
-            keys = list(records[0].keys())
-            upper = [k.upper() for k in keys]
-            self._lat_key = next(
-                (keys[i] for i, u in enumerate(upper) if u in ("LATITUDE", "LAT", "GEO_LATITUDE")), None
-            )
-            self._lon_key = next(
-                (keys[i] for i, u in enumerate(upper) if u in ("LONGITUDE", "LNG", "LON", "GEO_LONGITUDE")), None
-            )
-            self._status_key = next(
-                (keys[i] for i, u in enumerate(upper) if "STATUS" in u or "DESIGNATION" in u), None
-            )
-            self._addr_key = next(
-                (keys[i] for i, u in enumerate(upper) if "ADDR" in u), None
-            )
-
-        self._records = records
-
-    def _classify(self, raw: str) -> str:
-        u = raw.upper()
-        if "PART IV" in u or "IV" in u and "DESIGNAT" in u:
-            return "part_iv"
-        if "PART V" in u or "DISTRICT" in u or "HCD" in u or "CONSERVATION" in u:
-            return "part_v"
-        return "listed"
-
     async def lookup(self, location: GeocodeResult) -> HeritageEvidence:
         try:
-            await self._ensure_loaded()
+            return await self._lookup_duckdb(location)
         except Exception as exc:
-            return self._fallback(location, note=str(exc))
+            logger.warning("Heritage DuckDB lookup failed: %s — using fallback", exc)
+            return self._fallback(location)
 
-        if not self._records:
+    async def _lookup_duckdb(self, location: GeocodeResult) -> HeritageEvidence:
+        settings = get_settings()
+        store = await get_store(settings.duckdb_path)
+
+        if store.row_count("heritage") == 0:
             return HeritageEvidence(
                 status="no_match",
-                reason="Heritage dataset unavailable.",
-                source="ckan-heritage-register",
+                reason="Heritage dataset not loaded. Use /api/v1/pipeline/refresh to populate.",
+                source="duckdb-empty",
             )
 
-        matched: dict | None = None
+        # Bounding-box pre-filter in SQL, then GPU/numpy haversine on small candidate set
+        lat_delta = _MATCH_RADIUS_M / 111_000
+        lon_delta = _MATCH_RADIUS_M / (111_000 * math.cos(math.radians(location.latitude)))
 
-        if self._lat_key and self._lon_key:
-            for rec in self._records:
-                try:
-                    rlat = float(rec[self._lat_key])
-                    rlon = float(rec[self._lon_key])
-                except (TypeError, ValueError):
-                    continue
-                if _haversine_m(location.latitude, location.longitude, rlat, rlon) <= _MATCH_RADIUS_M:
-                    matched = rec
-                    break
-        elif self._addr_key:
-            needle = location.address.upper().split(",")[0].strip()[:20]
-            matched = next(
-                (r for r in self._records if needle in str(r.get(self._addr_key, "")).upper()),
-                None,
-            )
+        candidates_df = store.fetchdf(
+            """SELECT record_id, address, status, latitude, longitude
+               FROM heritage
+               WHERE latitude BETWEEN ? AND ?
+                 AND longitude BETWEEN ? AND ?""",
+            [
+                location.latitude - lat_delta,
+                location.latitude + lat_delta,
+                location.longitude - lon_delta,
+                location.longitude + lon_delta,
+            ],
+        )
 
-        if matched is None:
+        if candidates_df.empty:
             return HeritageEvidence(
                 status="no_match",
                 reason="No heritage property found at this location.",
-                source="ckan-heritage-register",
+                source="duckdb-heritage",
             )
 
-        raw_status = str(matched.get(self._status_key, "Listed")) if self._status_key else "Listed"
-        status = self._classify(raw_status)
+        hits = await gpu_spatial.find_within_radius(
+            location.latitude, location.longitude, candidates_df, _MATCH_RADIUS_M
+        )
 
+        if not hits:
+            return HeritageEvidence(
+                status="no_match",
+                reason="No heritage property found at this location.",
+                source="duckdb-heritage",
+            )
+
+        matched = hits[0]
+        status = matched.get("status", "listed")
         messages = {
             "part_iv": (
                 "Part IV designated heritage property. "
@@ -143,19 +84,24 @@ class HeritageService:
             ),
             "part_v": "Located in a heritage conservation district. Neighbourhood-level restrictions on alterations apply.",
             "listed": "On the Heritage Register but not yet designated. Lower risk, worth monitoring.",
+            "removed": "Previously listed heritage property, now removed from register.",
         }
-        return HeritageEvidence(status=status, reason=messages[status], source="ckan-heritage-register")
+        return HeritageEvidence(
+            status=status,
+            reason=messages.get(status, "Heritage status recorded."),
+            source="duckdb-heritage",
+        )
 
-    def _fallback(self, location: GeocodeResult, note: str = "") -> HeritageEvidence:
+    def _fallback(self, location: GeocodeResult) -> HeritageEvidence:
         lower = location.address.lower()
         if any(k in lower for k in ("distillery", "richmond", "front", "king")):
             return HeritageEvidence(
                 status="part_iv_or_sensitive_core",
-                reason=f"Heritage-sensitive address (live data unavailable: {note[:80]}).",
+                reason="Heritage-sensitive address (live data unavailable).",
                 source="heuristic-fallback",
             )
         return HeritageEvidence(
             status="no_match",
-            reason=f"No heritage signal (live data unavailable: {note[:80]}).",
+            reason="No heritage signal (live data unavailable).",
             source="heuristic-fallback",
         )

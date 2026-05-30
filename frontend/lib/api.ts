@@ -1,7 +1,9 @@
 import type {
   BreakdownPoint,
+  MapGeometry,
   MeridianFormState,
   MeridianReport,
+  MonteCarloDistribution,
   ScenarioPoint,
 } from "./report";
 
@@ -40,6 +42,20 @@ type BackendReport = {
     transit_dividend: number;
   };
   summary_text: string | null;
+  monte_carlo: {
+    p10: number;
+    p50: number;
+    p90: number;
+    mean: number;
+    trajectories_sampled: number;
+    elapsed_ms: number | null;
+  } | null;
+  map_geometry: {
+    property_lat: number;
+    property_lon: number;
+    flood_polygon_geojson: object | null;
+    dev_pressure_radius_m: number;
+  } | null;
 };
 
 const SCENARIO_ORDER = { bull: 0, base: 1, bear: 2 } as const;
@@ -76,6 +92,26 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
     backend.summary_text ??
     `${backend.property.normalized_address} — estimated true 10-year cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
 
+  const monteCarlo: MonteCarloDistribution | null = backend.monte_carlo
+    ? {
+        p10: backend.monte_carlo.p10,
+        p50: backend.monte_carlo.p50,
+        p90: backend.monte_carlo.p90,
+        mean: backend.monte_carlo.mean,
+        trajectoriesSampled: backend.monte_carlo.trajectories_sampled,
+        elapsedMs: backend.monte_carlo.elapsed_ms,
+      }
+    : null;
+
+  const mapGeometry: MapGeometry | null = backend.map_geometry
+    ? {
+        propertyLat: backend.map_geometry.property_lat,
+        propertyLon: backend.map_geometry.property_lon,
+        floodPolygonGeojson: backend.map_geometry.flood_polygon_geojson,
+        devPressureRadiusM: backend.map_geometry.dev_pressure_radius_m,
+      }
+    : null;
+
   return {
     summary,
     trueCost,
@@ -91,6 +127,8 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
       insuredPremium: backend.key_numbers.insured_mortgage_premium,
       baseMortgageCost10y: backend.key_numbers.mortgage_cost_10y_base,
     },
+    monteCarlo,
+    mapGeometry,
   };
 }
 

@@ -11,7 +11,8 @@ import {
   YAxis,
 } from "recharts";
 import { Panel } from "@/components/ui/panel";
-import type { BreakdownPoint, ScenarioPoint } from "@/lib/report";
+import { MonteCarloChart } from "@/components/monte-carlo-chart";
+import type { BreakdownPoint, MonteCarloDistribution, ScenarioPoint } from "@/lib/report";
 
 function currency(value: number) {
   return new Intl.NumberFormat("en-CA", {
@@ -24,9 +25,11 @@ function currency(value: number) {
 type ChartsProps = {
   components: BreakdownPoint[];
   scenarios: ScenarioPoint[];
+  monteCarlo?: MonteCarloDistribution | null;
+  listPrice?: number;
 };
 
-export function Charts({ components, scenarios }: ChartsProps) {
+export function Charts({ components, scenarios, monteCarlo = null, listPrice = 0 }: ChartsProps) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
       <Panel>
@@ -63,40 +66,17 @@ export function Charts({ components, scenarios }: ChartsProps) {
         <div className="space-y-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate">
-              Renewal Risk
+              {monteCarlo ? "Simulation Results" : "Renewal Risk"}
             </p>
             <h3 className="mt-2 font-display text-3xl text-ink">
-              Mortgage scenario ladder
+              {monteCarlo ? "10,000-trajectory distribution" : "Mortgage scenario ladder"}
             </h3>
           </div>
-          <div className="space-y-3">
-            {scenarios.map((item, index) => (
-              <div
-                key={item.scenario}
-                className="animate-rise rounded-3xl border border-[#D7E7E2] bg-[#F7FAF8] p-4"
-                style={{ animationDelay: `${index * 90}ms` }}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
-                      {item.scenario}
-                    </p>
-                    <p className="mt-2 font-display text-3xl text-ink">
-                      {currency(item.cost)}
-                    </p>
-                  </div>
-                  <div className="w-28 rounded-full bg-[#DDEEE3] p-1">
-                    <div
-                      className="h-2 rounded-full bg-moss"
-                      style={{
-                        width: `${72 + index * 12}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <MonteCarloChart
+            distribution={monteCarlo}
+            scenarios={scenarios}
+            listPrice={listPrice}
+          />
         </div>
       </Panel>
     </div>

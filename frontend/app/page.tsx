@@ -1,6 +1,5 @@
 import { Header } from "@/components/header";
 import { Hero } from "@/components/hero";
-import { MapPreview } from "@/components/map-preview";
 import { Workbench } from "@/components/workbench";
 
 export default function Home() {
@@ -9,7 +8,6 @@ export default function Home() {
       <Header />
       <Hero />
       <Workbench />
-      <MapPreview />
     </main>
   );
 }

@@ -32,6 +32,16 @@ class Settings(BaseSettings):
         "https://services6.arcgis.com/jr7MHa3BWLD2qqOB/arcgis/rest/services/"
         "Floodline_TRCA_Polygon/FeatureServer/0/query"
     )
+    # DuckDB / Parquet pipeline
+    duckdb_path: str = "data/meridian.duckdb"
+    parquet_dir: str = "data/parquet"
+    # GPU
+    gpu_enabled: bool = True
+    monte_carlo_n_sims: int = 10_000
+    # LLM upgrade
+    nemotron_model: str = "nvidia/nemotron-nano-4b-instruct"
+    nemo_retriever_enabled: bool = False
+    nemo_retriever_url: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
