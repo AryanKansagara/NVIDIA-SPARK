@@ -1,9 +1,11 @@
 export type BuyerProfile = "first_time" | "investor" | "downsizer";
+export type PropertyType = "condo" | "condo_townhouse" | "semi_detached" | "detached_urban" | "detached_suburban";
 
 export type MeridianFormState = {
   address: string;
   listPrice: number;
   buyerProfile: BuyerProfile;
+  propertyType: PropertyType;
   downPaymentPercent: number;
   mortgageRate: number;
   amortizationYears: number;
@@ -42,8 +44,15 @@ export type MeridianReport = {
 };
 
 const PROPERTY_TAX_RATE = 0.00767311;
-const ASSESSED_VALUE_FACTOR = 0.6;
-const PROPERTY_TAX_GROWTH = 0.03;
+const RATE_MULTI_RES = 0.01208792;
+const PROPERTY_TAX_GROWTH = 0.035;
+const AV_MULTIPLIERS: Record<string, number> = {
+  condo:             0.90,
+  condo_townhouse:   0.80,
+  semi_detached:     0.65,
+  detached_urban:    0.70,
+  detached_suburban: 0.55,
+};
 const CAR_BASELINE_10Y = 120000;
 
 function currencyRounding(value: number) {
@@ -75,12 +84,16 @@ function landTransferTaxOntario(price: number) {
 
 function landTransferTaxToronto(price: number) {
   let total = 0;
+  // Toronto MLTT brackets as of April 1, 2026
   const bands = [
-    { limit: 55000, rate: 0.005 },
-    { limit: 250000, rate: 0.01 },
-    { limit: 400000, rate: 0.015 },
-    { limit: 2000000, rate: 0.02 },
-    { limit: Number.POSITIVE_INFINITY, rate: 0.025 },
+    { limit: 55000,              rate: 0.005 },
+    { limit: 250000,             rate: 0.010 },
+    { limit: 400000,             rate: 0.015 },
+    { limit: 2_000_000,          rate: 0.020 },
+    { limit: 3_000_000,          rate: 0.025 },
+    { limit: 4_000_000,          rate: 0.035 },
+    { limit: 5_000_000,          rate: 0.045 },
+    { limit: Number.POSITIVE_INFINITY, rate: 0.055 },
   ];
 
   let previous = 0;
@@ -96,11 +109,15 @@ function landTransferTaxToronto(price: number) {
   return total;
 }
 
-function cmhcPremiumRate(downPaymentPercent: number) {
+function cmhcPremiumRate(listPrice: number, downPaymentPercent: number, amortizationYears: number) {
+  if (listPrice > 1_500_000) return 0;  // No CMHC above $1.5M
   if (downPaymentPercent >= 20) return 0;
-  if (downPaymentPercent >= 15) return 0.028;
-  if (downPaymentPercent >= 10) return 0.031;
-  return 0.04;
+  let rate: number;
+  if (downPaymentPercent >= 15) rate = 0.028;
+  else if (downPaymentPercent >= 10) rate = 0.031;
+  else rate = 0.04;
+  if (amortizationYears > 25) rate += 0.002;
+  return rate;
 }
 
 function monthlyPayment(principal: number, annualRatePercent: number, years: number) {
@@ -157,8 +174,9 @@ function tenYearMortgageCost(
   return firstCost + secondCost;
 }
 
-function taxProjection10Y(price: number) {
-  const annualTax = price * ASSESSED_VALUE_FACTOR * PROPERTY_TAX_RATE;
+function taxProjection10Y(price: number, propertyType: string, rate = PROPERTY_TAX_RATE) {
+  const multiplier = AV_MULTIPLIERS[propertyType] ?? 0.70;
+  const annualTax = price * multiplier * rate;
   const factor =
     (Math.pow(1 + PROPERTY_TAX_GROWTH, 10) - 1) / PROPERTY_TAX_GROWTH;
 
@@ -201,7 +219,8 @@ export function defaultFormState(): MeridianFormState {
     address: "401 Richmond St W, Toronto",
     listPrice: 850000,
     buyerProfile: "first_time",
-    downPaymentPercent: 10,
+    propertyType: "detached_urban",
+    downPaymentPercent: 20,
     mortgageRate: 4.79,
     amortizationYears: 25,
   };
@@ -211,7 +230,7 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
   const listPrice = Math.max(1, inputs.listPrice);
   const downPayment = (listPrice * inputs.downPaymentPercent) / 100;
   const borrowedBase = listPrice - downPayment;
-  const insuredPremium = borrowedBase * cmhcPremiumRate(inputs.downPaymentPercent);
+  const insuredPremium = borrowedBase * cmhcPremiumRate(listPrice, inputs.downPaymentPercent, inputs.amortizationYears);
   const mortgagePrincipal = borrowedBase + insuredPremium;
 
   const ontarioLtt = landTransferTaxOntario(listPrice);
@@ -219,7 +238,8 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
   const rebate = inputs.buyerProfile === "first_time" ? 8475 : 0;
   const ltt = Math.max(0, ontarioLtt + torontoLtt - rebate);
 
-  const propertyTax10y = taxProjection10Y(listPrice);
+  const taxRate = inputs.buyerProfile === "investor" ? RATE_MULTI_RES : PROPERTY_TAX_RATE;
+  const propertyTax10y = taxProjection10Y(listPrice, inputs.propertyType, taxRate);
   const baseMortgage = tenYearMortgageCost(
     mortgagePrincipal,
     inputs.mortgageRate,
@@ -290,7 +310,13 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
 
   if (inputs.buyerProfile === "first_time") {
     greenFlags.push(
-      "First-time buyer benefits are active in this preview, including FHSA, RRSP HBP, and the combined land transfer tax rebate.",
+      "Assumable mortgage: ask whether the seller has a locked-in rate below current market — a direct negotiation advantage.",
+    );
+    greenFlags.push(
+      "FHSA: up to $40,000 tax-free ($8,000/yr). Tax-deductible contributions, tax-free withdrawal for a qualifying home purchase.",
+    );
+    greenFlags.push(
+      "RRSP Home Buyers' Plan: up to $60,000/person ($120,000/couple) tax-free RRSP withdrawal, repayable over 15 years.",
     );
   }
 

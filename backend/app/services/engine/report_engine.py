@@ -1,19 +1,24 @@
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.schemas.report import CostComponent, KeyNumbers, RiskFlag, ScenarioCost
-from app.services.data_sources.models import DevelopmentEvidence, FloodEvidence, HeritageEvidence
+from app.schemas.report import CostComponent, KeyNumbers, RiskFlag, ScenarioCost, Severity
+from app.services.data_sources.models import ActivePermitsEvidence, BuildingHealthEvidence, ClearedPermitsEvidence, DevelopmentEvidence, FloodEvidence, HCDEvidence, HeritageEvidence
 
 
 @dataclass
 class EngineInput:
     list_price: float
     buyer_profile: str
+    property_type: str
     down_payment_percent: float
     mortgage_rate: float
     amortization_years: int
     address: str
     heritage: HeritageEvidence
+    hcd: HCDEvidence
+    active_permits: ActivePermitsEvidence
+    cleared_permits: ClearedPermitsEvidence
+    building_health: BuildingHealthEvidence
     flood: FloodEvidence
     development: DevelopmentEvidence
 
@@ -25,6 +30,7 @@ class EngineOutput:
     scenarios: list[ScenarioCost]
     flags: list[RiskFlag]
     key_numbers: KeyNumbers
+    property_tax_meta: dict  # av_low, av_mid, av_high, disclaimer
 
 
 class ReportEngine:
@@ -39,9 +45,11 @@ class ReportEngine:
         )
         land_transfer_tax_total = max(0, land_transfer_tax_total)
 
-        property_tax_10y = round(self._tax_projection_10y(payload.list_price))
+        property_tax_10y, av_low, av_mid, av_high = self._tax_projection_10y(
+            payload.list_price, payload.buyer_profile, payload.property_type
+        )
         insured_mortgage_premium = round(
-            self._insured_premium(payload.list_price, payload.down_payment_percent)
+            self._insured_premium(payload.list_price, payload.down_payment_percent, payload.amortization_years)
         )
         principal = (
             payload.list_price
@@ -74,9 +82,18 @@ class ReportEngine:
             )
         )
 
+        _HERITAGE_MATCH = {"part_iv", "part_v", "listed", "part_iv_or_sensitive_core"}
+        hcd_loading = 20000 if payload.hcd.in_district and payload.heritage.status != "part_v" else 0
+        permit_loading = (
+            20000 if payload.active_permits.structural_count > 0
+            else 8000 if payload.active_permits.permit_count > 0
+            else 0
+        )
         risk_adjustments = round(
-            (payload.flood.annual_risk_loading * 10)
-            + (12000 if payload.heritage.status != "no_match_preview" else 0)
+            (payload.flood.internal_loading * 10)
+            + (12000 if payload.heritage.status in _HERITAGE_MATCH else 0)
+            + hcd_loading
+            + permit_loading
             + (17000 if payload.development.intensity == "high" else 7000 if payload.development.intensity == "medium" else 0)
         )
 
@@ -124,7 +141,9 @@ class ReportEngine:
             ),
         ]
 
-        flags = self._flags(payload, insured_mortgage_premium, transit_dividend)
+        cmhc_pst = round(insured_mortgage_premium * 0.08)   # Ontario PST on premium, closing cost only
+        biweekly_savings = self._biweekly_savings_10y(principal, payload.mortgage_rate, payload.amortization_years)
+        flags = self._flags(payload, insured_mortgage_premium, cmhc_pst, biweekly_savings, transit_dividend)
         key_numbers = KeyNumbers(
             land_transfer_tax_total=land_transfer_tax_total,
             property_tax_10y=property_tax_10y,
@@ -139,29 +158,146 @@ class ReportEngine:
             scenarios=scenarios,
             flags=flags,
             key_numbers=key_numbers,
+            property_tax_meta={
+                "av_low": av_low,
+                "av_mid": av_mid,
+                "av_high": av_high,
+                "disclaimer": self._PROPERTY_TAX_DISCLAIMER,
+            },
         )
 
     def _flags(
         self,
         payload: EngineInput,
         insured_mortgage_premium: int,
+        cmhc_pst: int,
+        biweekly_savings: int,
         transit_dividend: int,
     ) -> list[RiskFlag]:
+        _HERITAGE_MATCH = {"part_iv", "part_v", "listed", "part_iv_or_sensitive_core"}
         flags: list[RiskFlag] = []
-        if payload.heritage.status != "no_match_preview":
+        if payload.heritage.status in _HERITAGE_MATCH:
             flags.append(
                 RiskFlag(
                     severity="red",
-                    title="Heritage sensitivity",
-                    message="This address triggered the heritage-sensitive preview path. Renovation and permit constraints should be reviewed.",
+                    title="Heritage designation",
+                    message=payload.heritage.reason,
                 )
             )
-        if payload.flood.in_flood_zone:
+        if payload.hcd.in_district:
+            district = f" ({payload.hcd.district_name})" if payload.hcd.district_name else ""
             flags.append(
                 RiskFlag(
                     severity="red",
-                    title="Flood risk signal",
-                    message="This property intersects the MVP flood-risk preview and carries additional annual loading.",
+                    title="Heritage Conservation District",
+                    message=(
+                        f"This property is in a Heritage Conservation District{district}. "
+                        "Neighbourhood-level heritage restrictions apply — exterior alterations "
+                        "require design review even without individual designation. "
+                        "Budget for a $20,000–$40,000 renovation complexity premium."
+                    ),
+                )
+            )
+        ap = payload.active_permits
+        if ap.structural_count > 0:
+            long_open = f" {ap.elevated_risk_count} open more than 2 years." if ap.elevated_risk_count > 0 else ""
+            flags.append(
+                RiskFlag(
+                    severity="red",
+                    title="Active structural permits",
+                    message=(
+                        f"{ap.structural_count} active structural permit(s) found on this property.{long_open} "
+                        "Unresolved permits transfer to the buyer at closing — review permit details before purchase."
+                    ),
+                )
+            )
+        elif ap.permit_count > 0:
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Active building permits",
+                    message=(
+                        f"{ap.permit_count} active permit(s) found ({', '.join(ap.top_work_types)}). "
+                        "Unresolved permits transfer to the buyer at closing."
+                    ),
+                )
+            )
+        elif ap.elevated_risk_count > 0:
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Long-running permits",
+                    message=f"{ap.elevated_risk_count} permit(s) open more than 2 years. Further due diligence recommended.",
+                )
+            )
+
+        cp = payload.cleared_permits
+        if cp.chronic_issues:
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Elevated maintenance complexity signal",
+                    message=(
+                        f"This property has {cp.structural_count} structural permit(s) on record. "
+                        "Elevated maintenance complexity signal — further due diligence recommended."
+                    ),
+                )
+            )
+        elif cp.deferred_maintenance and cp.permit_count == 0:
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Deferred maintenance signal",
+                    message=(
+                        "No cleared building permits found for this property. "
+                        "On older buildings this may indicate deferred maintenance — further due diligence recommended."
+                    ),
+                )
+            )
+        elif cp.deferred_maintenance:
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Deferred maintenance signal",
+                    message=(
+                        f"No building permits in the last 15 years ({cp.permit_count} historical permit(s) on record). "
+                        "Further due diligence recommended."
+                    ),
+                )
+            )
+
+        bh = payload.building_health
+        if bh.message:
+            severity: Severity = "red" if bh.status == "elevated" else "yellow"
+            flags.append(
+                RiskFlag(
+                    severity=severity,
+                    title="Building health" + (" (RentSafeTO)" if bh.path == "rentsafeto" else ""),
+                    message=bh.message,
+                )
+            )
+
+        if payload.flood.status == "elevated":
+            flags.append(
+                RiskFlag(
+                    severity="red",
+                    title="Flood Exposure: Elevated",
+                    message=(
+                        "This property intersects a TRCA flood-risk area. "
+                        "Insurance implications vary significantly by insurer and property characteristics. "
+                        "Verify coverage and premiums directly with your insurer."
+                    ),
+                )
+            )
+        elif payload.flood.status == "moderate":
+            flags.append(
+                RiskFlag(
+                    severity="yellow",
+                    title="Flood Exposure: Moderate",
+                    message=(
+                        "This property is near a TRCA flood-risk area. "
+                        "Verify flood risk and insurance implications with your insurer."
+                    ),
                 )
             )
         if payload.development.intensity == "high":
@@ -182,11 +318,75 @@ class ReportEngine:
             )
 
         if insured_mortgage_premium > 0:
+            pst_note = f" Ontario PST on the premium (${cmhc_pst:,}) is payable at closing and is not financed." if cmhc_pst > 0 else ""
             flags.append(
                 RiskFlag(
                     severity="yellow",
-                    title="Insured mortgage premium",
-                    message=f"Down payment under 20% adds an estimated insured premium of ${insured_mortgage_premium:,} to principal.",
+                    title="Insured mortgage premium (CMHC)",
+                    message=(
+                        f"Down payment under 20% adds an estimated CMHC premium of ${insured_mortgage_premium:,} to principal.{pst_note}"
+                    ),
+                )
+            )
+
+        # Sub-signal 10a: Assumable mortgage (first-time buyers)
+        if payload.buyer_profile == "first_time":
+            flags.append(
+                RiskFlag(
+                    severity="green",
+                    title="Assumable mortgage opportunity",
+                    message=(
+                        "Ask whether the seller has a locked-in mortgage rate below current market. "
+                        "If assumable, you may be able to take over their mortgage — a direct negotiation advantage."
+                    ),
+                )
+            )
+
+        # Sub-signal 10b: IRD prepayment penalty warning
+        flags.append(
+            RiskFlag(
+                severity="info",
+                title="Seller prepayment penalty (IRD)",
+                message=(
+                    "If the seller breaks a fixed-rate mortgage early, they face an Interest Rate Differential (IRD) penalty. "
+                    "A large IRD reduces the seller's flexibility to negotiate on price — ask your agent to investigate."
+                ),
+            )
+        )
+
+        # Sub-signal 10c: Amortization accelerator
+        if biweekly_savings > 0:
+            flags.append(
+                RiskFlag(
+                    severity="green",
+                    title="Amortization accelerator",
+                    message=(
+                        f"Switching from monthly to accelerated bi-weekly payments saves an estimated "
+                        f"${biweekly_savings:,} in interest over the first 10 years at your starting rate."
+                    ),
+                )
+            )
+
+        # Sub-signals 10d + 10e: First-time buyer programs
+        if payload.buyer_profile == "first_time":
+            flags.append(
+                RiskFlag(
+                    severity="green",
+                    title="First Home Savings Account (FHSA)",
+                    message=(
+                        "You may be eligible for the FHSA: up to $40,000 tax-free ($8,000/yr limit). "
+                        "Contributions are tax-deductible; withdrawals for a qualifying home purchase are tax-free."
+                    ),
+                )
+            )
+            flags.append(
+                RiskFlag(
+                    severity="green",
+                    title="RRSP Home Buyers' Plan (HBP)",
+                    message=(
+                        "You may be eligible to withdraw up to $60,000 ($120,000/couple) from your RRSP tax-free. "
+                        "Repayable over 15 years starting the second year after withdrawal."
+                    ),
                 )
             )
 
@@ -210,12 +410,16 @@ class ReportEngine:
         return self._progressive_tax(price, bands)
 
     def _land_transfer_tax_toronto(self, price: float) -> float:
+        # Toronto MLTT brackets as of April 1, 2026
         bands = [
-            (55000, 0.005),
-            (250000, 0.01),
-            (400000, 0.015),
-            (2000000, 0.02),
-            (float("inf"), 0.025),
+            (55000,          0.005),
+            (250000,         0.010),
+            (400000,         0.015),
+            (2_000_000,      0.020),
+            (3_000_000,      0.025),
+            (4_000_000,      0.035),
+            (5_000_000,      0.045),
+            (float("inf"),   0.055),
         ]
         return self._progressive_tax(price, bands)
 
@@ -231,17 +435,44 @@ class ReportEngine:
                 break
         return total
 
-    def _insured_premium(self, list_price: float, down_payment_percent: float) -> float:
+    def _insured_premium(self, list_price: float, down_payment_percent: float, amortization_years: int) -> float:
+        if list_price > 1_500_000:
+            return 0.0  # No CMHC for homes above $1.5M
         borrowed = list_price - list_price * (down_payment_percent / 100)
         if down_payment_percent >= 20:
-            rate = 0.0
-        elif down_payment_percent >= 15:
+            return 0.0
+        if down_payment_percent >= 15:
             rate = 0.028
         elif down_payment_percent >= 10:
             rate = 0.031
         else:
             rate = 0.04
+        if amortization_years > 25:
+            rate += 0.002
         return borrowed * rate
+
+    def _biweekly_savings_10y(self, principal: float, rate_percent: float, amort_years: int) -> int:
+        """Interest saved over 10 years by switching monthly → accelerated bi-weekly payments."""
+        monthly = self._monthly_payment(principal, rate_percent, amort_years)
+        monthly_rate = rate_percent / 100 / 12
+        biweekly_rate = rate_percent / 100 / 26
+
+        bal_m = principal
+        interest_m = 0.0
+        for _ in range(120):
+            interest = bal_m * monthly_rate
+            interest_m += interest
+            bal_m -= monthly - interest
+
+        biweekly = monthly / 2
+        bal_bw = principal
+        interest_bw = 0.0
+        for _ in range(260):
+            interest = bal_bw * biweekly_rate
+            interest_bw += interest
+            bal_bw -= biweekly - interest
+
+        return max(0, round(interest_m - interest_bw))
 
     def _monthly_payment(self, principal: float, annual_rate_percent: float, years: int) -> float:
         monthly_rate = annual_rate_percent / 100 / 12
@@ -292,10 +523,34 @@ class ReportEngine:
         )
         return first_cost + second_payment * second_term_months
 
-    def _tax_projection_10y(self, list_price: float) -> float:
-        annual_tax = list_price * self.settings.assessed_value_factor * self.settings.property_tax_rate
+    _RATE_MULTI_RES = 0.01208792
+    _AV_MULTIPLIERS: dict[str, float] = {
+        "condo":              0.90,
+        "condo_townhouse":    0.80,
+        "semi_detached":      0.65,
+        "detached_urban":     0.70,
+        "detached_suburban":  0.55,
+    }
+    _PROPERTY_TAX_DISCLAIMER = (
+        "Estimated using property-type proxy. Actual taxes depend on your MPAC assessed value. "
+        "MPAC values are frozen at January 1, 2016. 10-year projection is an illustrative scenario "
+        "based on recent rate trends — not a confirmed forecast."
+    )
+
+    def _tax_projection_10y(
+        self, list_price: float, buyer_profile: str, property_type: str
+    ) -> tuple[int, int, int, int]:
+        """Returns (tax_10y, av_low, av_mid, av_high) all as rounded ints."""
+        multiplier = self._AV_MULTIPLIERS.get(property_type, 0.70)
+        av_mid = list_price * multiplier
+        av_low = round(av_mid * 0.85)
+        av_high = round(av_mid * 1.15)
+        av_mid = round(av_mid)
+
+        rate = self._RATE_MULTI_RES if buyer_profile == "investor" else self.settings.property_tax_rate
+        annual_tax = av_mid * rate
         factor = ((1 + self.settings.property_tax_growth_rate) ** 10 - 1) / self.settings.property_tax_growth_rate
-        return annual_tax * factor
+        return round(annual_tax * factor), av_low, av_mid, av_high
 
     def _transit_dividend(self, address: str) -> int:
         lower = address.lower()

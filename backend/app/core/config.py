@@ -12,11 +12,11 @@ class Settings(BaseSettings):
     geocoder_city_bias: str = "Toronto, Ontario, Canada"
     request_timeout_seconds: float = Field(default=12.0, gt=0)
     property_tax_rate: float = 0.00767311
-    assessed_value_factor: float = 0.60
-    property_tax_growth_rate: float = 0.03
+    property_tax_growth_rate: float = 0.035
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
-    flood_risk_annual_loading: int = 3500
+    flood_risk_internal_loading: int = 2500   # internal cost estimate only — never surface in output
+    trca_flood_fallback_geojson: str = "data/trca_floodplain_toronto.geojson"
     nim_base_url: str = "http://localhost:8080/v1"
     nim_model: str = "meta/llama-3.1-8b-instruct"
     nim_enabled: bool = True
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 100
     trca_flood_query_url: str = (
-        "https://services6.arcgis.com/jr7MHa3BWLD2qqOB/arcgis/rest/services/"
+        "https://services1.arcgis.com/pMeXFF5bmbv34Alm/arcgis/rest/services/"
         "Floodline_TRCA_Polygon/FeatureServer/0/query"
     )
 

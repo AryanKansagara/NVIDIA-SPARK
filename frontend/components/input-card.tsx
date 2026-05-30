@@ -3,7 +3,7 @@
 import { type ComponentType, type FormEvent, type ReactNode, useState } from "react";
 import { Home, Percent, ReceiptText, UserRound } from "lucide-react";
 import { Panel } from "@/components/ui/panel";
-import type { BuyerProfile, MeridianFormState } from "@/lib/report";
+import type { BuyerProfile, MeridianFormState, PropertyType } from "@/lib/report";
 
 type InputCardProps = {
   initialValues: MeridianFormState;
@@ -104,6 +104,23 @@ export function InputCard({ initialValues, onSubmit }: InputCardProps) {
               <option value="first_time">First-time buyer</option>
               <option value="investor">Investor</option>
               <option value="downsizer">Downsizer</option>
+            </select>
+          </Field>
+          <Field
+            label="Property Type"
+            hint="Used to estimate assessed value proxy for property tax."
+            icon={Home}
+          >
+            <select
+              className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
+              value={form.propertyType}
+              onChange={(event) => update("propertyType", event.target.value as PropertyType)}
+            >
+              <option value="condo">Condo</option>
+              <option value="condo_townhouse">Condo Townhouse</option>
+              <option value="semi_detached">Semi-Detached</option>
+              <option value="detached_urban">Detached (Urban)</option>
+              <option value="detached_suburban">Detached (Suburban)</option>
             </select>
           </Field>
           <div className="grid gap-3 md:grid-cols-3">

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 BuyerProfile = Literal["first_time", "investor", "downsizer"]
+PropertyType = Literal["condo", "condo_townhouse", "semi_detached", "detached_urban", "detached_suburban"]
 Severity = Literal["red", "yellow", "green", "info"]
 
 
@@ -11,6 +12,7 @@ class ReportRequest(BaseModel):
     address: str = Field(min_length=3)
     list_price: float = Field(gt=0)
     buyer_profile: BuyerProfile
+    property_type: PropertyType = "detached_urban"
     down_payment_percent: float = Field(ge=5, le=100)
     mortgage_rate: float = Field(gt=0, le=30)
     amortization_years: int = Field(ge=5, le=35)
@@ -44,6 +46,11 @@ class RiskFlag(BaseModel):
 class EvidenceSummary(BaseModel):
     geocoder: dict
     heritage: dict
+    hcd: dict
+    active_permits: dict
+    cleared_permits: dict
+    building_health: dict
+    property_tax: dict
     flood: dict
     development: dict
 

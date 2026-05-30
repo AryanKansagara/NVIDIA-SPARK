@@ -25,8 +25,8 @@ class FloodDebugResponse(BaseModel):
     normalized_address: str
     latitude: float
     longitude: float
+    status: str
     in_flood_zone: bool
-    annual_risk_loading: int
     source: str
 
 

@@ -3,12 +3,13 @@ import math
 
 import httpx
 
-from app.services.data_sources.models import HeritageEvidence
+from app.services.data_sources.models import HCDEvidence, HeritageEvidence
 from app.services.geocoding.service import GeocodeResult
 
 _CKAN_BASE = "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action"
 _PACKAGE = "heritage-register"
-_MATCH_RADIUS_M = 80  # generous for geocoder accuracy variance
+_MATCH_RADIUS_M = 25       # spec: match within 25m
+_LOW_CONF_RADIUS_M = 50    # spec: LOW confidence if no match within 50m
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -27,6 +28,7 @@ class HeritageService:
         self._lon_key: str | None = None
         self._status_key: str | None = None
         self._addr_key: str | None = None
+        self._date_key: str | None = None
         self._lock = asyncio.Lock()
 
     async def _ensure_loaded(self) -> None:
@@ -83,6 +85,9 @@ class HeritageService:
             self._addr_key = next(
                 (keys[i] for i, u in enumerate(upper) if "ADDR" in u), None
             )
+            self._date_key = next(
+                (keys[i] for i, u in enumerate(upper) if "DATE" in u), None
+            )
 
         self._records = records
 
@@ -105,9 +110,11 @@ class HeritageService:
                 status="no_match",
                 reason="Heritage dataset unavailable.",
                 source="ckan-heritage-register",
+                confidence="UNKNOWN",
             )
 
         matched: dict | None = None
+        nearest_dist: float = float("inf")
 
         if self._lat_key and self._lon_key:
             for rec in self._records:
@@ -116,7 +123,10 @@ class HeritageService:
                     rlon = float(rec[self._lon_key])
                 except (TypeError, ValueError):
                     continue
-                if _haversine_m(location.latitude, location.longitude, rlat, rlon) <= _MATCH_RADIUS_M:
+                dist = _haversine_m(location.latitude, location.longitude, rlat, rlon)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                if dist <= _MATCH_RADIUS_M:
                     matched = rec
                     break
         elif self._addr_key:
@@ -127,24 +137,42 @@ class HeritageService:
             )
 
         if matched is None:
+            # spec: LOW confidence if no match within 50m, otherwise no signal
+            confidence = "LOW" if nearest_dist <= _LOW_CONF_RADIUS_M else "LOW"
             return HeritageEvidence(
                 status="no_match",
                 reason="No heritage property found at this location.",
                 source="ckan-heritage-register",
+                confidence=confidence,
             )
 
         raw_status = str(matched.get(self._status_key, "Listed")) if self._status_key else "Listed"
         status = self._classify(raw_status)
+        has_date = bool(self._date_key and matched.get(self._date_key))
+        # spec confidence rules: HIGH = found with designation date, MEDIUM = found but status unclear
+        confidence = "HIGH" if has_date else "MEDIUM"
 
         messages = {
             "part_iv": (
-                "Part IV designated heritage property. "
-                "Renovations require heritage permit review; budget for delays and exterior alteration restrictions."
+                "Elevated review recommended. This property is fully heritage designated. "
+                "Renovations require heritage permit review — budget for delays and potential "
+                "restrictions on exterior alterations."
             ),
-            "part_v": "Located in a heritage conservation district. Neighbourhood-level restrictions on alterations apply.",
-            "listed": "On the Heritage Register but not yet designated. Lower risk, worth monitoring.",
+            "part_v": (
+                "This property is in a heritage conservation district. "
+                "Neighbourhood-level heritage restrictions apply."
+            ),
+            "listed": (
+                "This property is on the Heritage Register but not yet formally designated. "
+                "Lower risk, worth monitoring."
+            ),
         }
-        return HeritageEvidence(status=status, reason=messages[status], source="ckan-heritage-register")
+        return HeritageEvidence(
+            status=status,
+            reason=messages[status],
+            source="ckan-heritage-register",
+            confidence=confidence,
+        )
 
     def _fallback(self, location: GeocodeResult, note: str = "") -> HeritageEvidence:
         lower = location.address.lower()
@@ -153,9 +181,121 @@ class HeritageService:
                 status="part_iv_or_sensitive_core",
                 reason=f"Heritage-sensitive address (live data unavailable: {note[:80]}).",
                 source="heuristic-fallback",
+                confidence="UNKNOWN",
             )
         return HeritageEvidence(
             status="no_match",
             reason=f"No heritage signal (live data unavailable: {note[:80]}).",
             source="heuristic-fallback",
+            confidence="UNKNOWN",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Heritage Conservation Districts (Parameter 2)
+# ---------------------------------------------------------------------------
+
+_HCD_PACKAGE = "heritage-conservation-districts"
+
+
+def _ray_cast(lon: float, lat: float, ring: list) -> bool:
+    """Point-in-polygon via ray casting. Ring is a list of [lon, lat] pairs."""
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if ((yi > lat) != (yj > lat)) and lon < (xj - xi) * (lat - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _point_in_feature(lon: float, lat: float, geometry: dict) -> bool:
+    """Test a point against a GeoJSON Polygon or MultiPolygon geometry."""
+    gtype = geometry.get("type")
+    coords = geometry.get("coordinates", [])
+    if gtype == "Polygon":
+        # coords[0] is exterior ring; ignore holes for this use case
+        return _ray_cast(lon, lat, coords[0]) if coords else False
+    if gtype == "MultiPolygon":
+        return any(_ray_cast(lon, lat, poly[0]) for poly in coords if poly)
+    return False
+
+
+class HCDService:
+    def __init__(self) -> None:
+        self._features: list[dict] | None = None
+        self._lock = asyncio.Lock()
+
+    async def _ensure_loaded(self) -> None:
+        if self._features is not None:
+            return
+        async with self._lock:
+            if self._features is not None:
+                return
+            await self._fetch()
+
+    async def _fetch(self) -> None:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            pkg = await client.get(f"{_CKAN_BASE}/package_show", params={"id": _HCD_PACKAGE})
+            pkg.raise_for_status()
+            resources = pkg.json()["result"]["resources"]
+
+            geojson_url = next(
+                (r["url"] for r in resources if r.get("format", "").upper() in ("GEOJSON", "JSON", "GEOJSON (WGS84)")),
+                None,
+            )
+            if not geojson_url:
+                self._features = []
+                return
+
+            resp = await client.get(geojson_url, follow_redirects=True)
+            resp.raise_for_status()
+            data = resp.json()
+
+        self._features = data.get("features", [])
+
+    async def lookup(self, location: GeocodeResult) -> HCDEvidence:
+        try:
+            await self._ensure_loaded()
+        except Exception as exc:
+            return HCDEvidence(
+                in_district=False,
+                district_name=None,
+                source="heuristic-fallback",
+                confidence="UNKNOWN",
+            )
+
+        if not self._features:
+            return HCDEvidence(
+                in_district=False,
+                district_name=None,
+                source="ckan-hcd",
+                confidence="UNKNOWN",
+            )
+
+        lon, lat = location.longitude, location.latitude
+        for feature in self._features:
+            geometry = feature.get("geometry") or {}
+            if _point_in_feature(lon, lat, geometry):
+                props = feature.get("properties") or {}
+                name = (
+                    props.get("NAME")
+                    or props.get("DISTRICT_NAME")
+                    or props.get("HCD_NAME")
+                    or props.get("name")
+                )
+                return HCDEvidence(
+                    in_district=True,
+                    district_name=name,
+                    source="ckan-hcd",
+                    confidence="HIGH",
+                )
+
+        return HCDEvidence(
+            in_district=False,
+            district_name=None,
+            source="ckan-hcd",
+            confidence="HIGH",
         )
