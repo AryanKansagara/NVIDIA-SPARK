@@ -244,7 +244,7 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
     (inputs.address.toLowerCase().includes("richmond") ? 29000 : 18000) +
     (inputs.buyerProfile === "investor" ? 8000 : 0);
 
-  const trueCost = ltt + propertyTax10y + baseMortgage + riskAdjustments - inferredTransitDividend;
+  const trueCost = downPayment + ltt + propertyTax10y + baseMortgage + riskAdjustments - inferredTransitDividend;
   const aboveListPercent = currencyRounding(((trueCost - listPrice) / listPrice) * 100);
 
   const components: BreakdownPoint[] = [
@@ -301,9 +301,9 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
     transitDividend: inferredTransitDividend,
     components,
     scenarios: [
-      { scenario: "Bull", cost: currencyRounding(ltt + propertyTax10y + bullMortgage + riskAdjustments - inferredTransitDividend) },
+      { scenario: "Bull", cost: currencyRounding(downPayment + ltt + propertyTax10y + bullMortgage + riskAdjustments - inferredTransitDividend) },
       { scenario: "Base", cost: currencyRounding(trueCost) },
-      { scenario: "Bear", cost: currencyRounding(ltt + propertyTax10y + bearMortgage + riskAdjustments - inferredTransitDividend) },
+      { scenario: "Bear", cost: currencyRounding(downPayment + ltt + propertyTax10y + bearMortgage + riskAdjustments - inferredTransitDividend) },
     ],
     flags: {
       red: redFlags,

@@ -85,7 +85,7 @@ export function InputCard({ initialValues, onSubmit }: InputCardProps) {
             <input
               className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
               type="number"
-              min={1}
+              min={1000}
               step={1000}
               value={form.listPrice}
               onChange={(event) => update("listPrice", Number(event.target.value))}
