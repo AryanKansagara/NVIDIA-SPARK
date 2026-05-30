@@ -6,16 +6,60 @@ Takes a Toronto address, list price, and buyer profile and returns the **true 10
 
 ## Running locally
 
-You need two terminals. A Python venv with dependencies installed is assumed.
+### Backend setup
+
+The backend requires **Python 3.11+** and uses [`uv`](https://github.com/astral-sh/uv) for dependency management.
+
+**1. Install uv** (if not already installed)
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**2. Install dependencies**
+```bash
+cd backend
+uv sync
+```
+
+**3. Configure environment**
+
+Copy the example env file and fill in your values:
+```bash
+cp .env.example .env   # if .env.example exists, otherwise create .env manually
+```
+
+Minimum `.env` for local development (NIM disabled):
+```env
+NIM_ENABLED=false
+```
+
+See the [Configuration](#configuration) section below for all available variables.
+
+**4. Start the backend**
+```bash
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+Or, if you activated the virtual environment manually (`source .venv/bin/activate`):
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Confirm healthy: `http://localhost:8000/api/v1/health`
+
+> The first report request takes 10–20 s while heritage and development datasets load from CKAN into memory. Subsequent requests are fast.
+
+---
+
+### Full stack (all terminals)
+
+You need two terminals (three if running NIM).
 
 **Terminal 1 — backend**
 ```bash
 cd backend
-uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 ```
-Confirm healthy: `http://localhost:8000/api/v1/health`
-
-> The first report request takes 10–20 s while heritage and development datasets load from CKAN into memory. Subsequent requests are fast.
 
 **Terminal 2 — frontend**
 ```bash
