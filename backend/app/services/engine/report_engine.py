@@ -25,7 +25,8 @@ class EngineInput:
 
 @dataclass
 class EngineOutput:
-    total_cost: int
+    true_cost: int
+    total_cost: int  # 10-year cash outflow (secondary)
     components: list[CostComponent]
     scenarios: list[ScenarioCost]
     flags: list[RiskFlag]
@@ -103,6 +104,7 @@ class ReportEngine:
 
         down_payment = round(payload.list_price * (payload.down_payment_percent / 100))
         transit_dividend = self._transit_dividend(payload.address)
+        # 10-year cash outflow (secondary metric)
         total_cost = round(
             down_payment
             + land_transfer_tax_total
@@ -112,8 +114,23 @@ class ReportEngine:
             - transit_dividend
         )
 
+        # True cost: purchase price + interest + all carrying costs
+        interest_base = round(self._ten_year_interest_cost(principal, payload.mortgage_rate, payload.amortization_years, 0.0))
+        interest_bull = round(self._ten_year_interest_cost(principal, payload.mortgage_rate, payload.amortization_years, -0.5))
+        interest_bear = round(self._ten_year_interest_cost(principal, payload.mortgage_rate, payload.amortization_years, 1.5))
+        list_price_int = round(payload.list_price)
+        true_cost = round(
+            list_price_int
+            + interest_base
+            + land_transfer_tax_total
+            + property_tax_10y
+            + risk_adjustments
+            - transit_dividend
+        )
+
         components = [
-            CostComponent(key="mortgage_base", label="Mortgage", amount=mortgage_base),
+            CostComponent(key="purchase_price", label="Purchase Price", amount=list_price_int),
+            CostComponent(key="mortgage_interest_10y", label="Mortgage Interest (10yr)", amount=interest_base),
             CostComponent(key="land_transfer_tax", label="Transfer Tax", amount=land_transfer_tax_total),
             CostComponent(key="property_tax_10y", label="Property Tax", amount=property_tax_10y),
             CostComponent(key="risk_adjustments", label="Risk Loadings", amount=risk_adjustments),
@@ -122,26 +139,12 @@ class ReportEngine:
         scenarios = [
             ScenarioCost(
                 scenario="bull",
-                total_cost=round(
-                    down_payment
-                    + land_transfer_tax_total
-                    + property_tax_10y
-                    + mortgage_bull
-                    + risk_adjustments
-                    - transit_dividend
-                ),
+                total_cost=round(list_price_int + interest_bull + land_transfer_tax_total + property_tax_10y + risk_adjustments - transit_dividend),
             ),
-            ScenarioCost(scenario="base", total_cost=total_cost),
+            ScenarioCost(scenario="base", total_cost=true_cost),
             ScenarioCost(
                 scenario="bear",
-                total_cost=round(
-                    down_payment
-                    + land_transfer_tax_total
-                    + property_tax_10y
-                    + mortgage_bear
-                    + risk_adjustments
-                    - transit_dividend
-                ),
+                total_cost=round(list_price_int + interest_bear + land_transfer_tax_total + property_tax_10y + risk_adjustments - transit_dividend),
             ),
         ]
 
@@ -152,7 +155,7 @@ class ReportEngine:
             land_transfer_tax_total=land_transfer_tax_total,
             property_tax_10y=property_tax_10y,
             insured_mortgage_premium=insured_mortgage_premium,
-            mortgage_cost_10y_base=mortgage_base,
+            mortgage_cost_10y_base=interest_base,
             transit_dividend=transit_dividend,
         )
 
@@ -173,6 +176,7 @@ class ReportEngine:
         verdict_level, verdict_headline = self._derive_verdict(payload, flags, composite_signals)
 
         return EngineOutput(
+            true_cost=true_cost,
             total_cost=total_cost,
             components=components,
             scenarios=scenarios,
@@ -624,6 +628,23 @@ class ReportEngine:
             max(1, amortization_years - 5),
         )
         return first_cost + second_payment * second_term_months
+
+    def _ten_year_interest_cost(
+        self,
+        principal: float,
+        start_rate: float,
+        amortization_years: int,
+        renewal_delta: float,
+    ) -> float:
+        """Interest paid over 10 years (total payments minus principal repaid)."""
+        remaining_after_first = self._remaining_balance(principal, start_rate, amortization_years, 60)
+        second_rate = max(0.5, start_rate + renewal_delta)
+        remaining_after_second = self._remaining_balance(
+            remaining_after_first, second_rate, max(1, amortization_years - 5), 60
+        )
+        total_payments = self._ten_year_mortgage_cost(principal, start_rate, amortization_years, renewal_delta)
+        principal_repaid = principal - remaining_after_second
+        return total_payments - principal_repaid
 
     _RATE_MULTI_RES = 0.01208792
     _AV_MULTIPLIERS: dict[str, float] = {

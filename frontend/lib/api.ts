@@ -6,7 +6,8 @@ import type {
 } from "./report";
 
 const FILL_COLORS: Record<string, string> = {
-  mortgage_base: "#10212B",
+  purchase_price: "#10212B",
+  mortgage_interest_10y: "#1D3D4F",
   land_transfer_tax: "#E16B47",
   property_tax_10y: "#B99239",
   risk_adjustments: "#8C5B4A",
@@ -27,7 +28,8 @@ type BackendReport = {
     longitude: number;
     ward: string | null;
   };
-  true_10_year_cost: number;
+  true_cost: number;
+  cash_outflow_10y: number;
   cost_breakdown: { key: string; label: string; amount: number }[];
   mortgage_scenarios: { scenario: "bull" | "base" | "bear"; total_cost: number }[];
   flags: BackendFlag[];
@@ -45,7 +47,8 @@ type BackendReport = {
 const SCENARIO_ORDER = { bull: 0, base: 1, bear: 2 } as const;
 
 function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianReport {
-  const trueCost = backend.true_10_year_cost;
+  const trueCost = backend.true_cost;
+  const cashOutflow10y = backend.cash_outflow_10y;
   const aboveListPercent = Math.round(((trueCost - inputs.listPrice) / inputs.listPrice) * 100);
 
   const components: BreakdownPoint[] = backend.cost_breakdown.map((c) => ({
@@ -74,11 +77,12 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
 
   const summary =
     backend.summary_text ??
-    `${backend.property.normalized_address} — estimated true 10-year cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
+    `${backend.property.normalized_address} — true ownership cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
 
   return {
     summary,
     trueCost,
+    cashOutflow10y,
     aboveListPercent,
     transitDividend: backend.key_numbers.transit_dividend,
     components,

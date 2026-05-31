@@ -190,6 +190,20 @@ def test_cost_breakdown_keys():
     engine = make_engine()
     result = engine.build(base_input())
     keys = [c.key for c in result.components]
-    assert "mortgage_base" in keys
+    assert "purchase_price" in keys
+    assert "mortgage_interest_10y" in keys
     assert "land_transfer_tax" in keys
     assert "property_tax_10y" in keys
+
+
+def test_true_cost_exceeds_list_price():
+    engine = make_engine()
+    result = engine.build(base_input())
+    assert result.true_cost > base_input().list_price
+
+
+def test_true_cost_greater_than_cash_outflow():
+    # true_cost includes full list price; cash_outflow_10y is a subset
+    engine = make_engine()
+    result = engine.build(base_input())
+    assert result.true_cost > result.total_cost

@@ -93,7 +93,8 @@ class ReportResponse(BaseModel):
     property: ResolvedProperty
     verdict_level: str       # "RED" | "YELLOW" | "GREEN"
     verdict_headline: str
-    true_10_year_cost: int
+    true_cost: int
+    cash_outflow_10y: int
     cost_breakdown: list[CostComponent]
     mortgage_scenarios: list[ScenarioCost]
     flags: list[RiskFlag]

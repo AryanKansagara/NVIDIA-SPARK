@@ -51,15 +51,16 @@ def _templated_summary(
 ) -> str:
     """Deterministic fallback when LLM fails twice. Correct numbers, plain prose."""
     kn = engine_output.key_numbers
-    above = round((engine_output.total_cost - list_price) / list_price * 100)
+    above = round((engine_output.true_cost - list_price) / list_price * 100)
     red_flags = [f for f in engine_output.flags if f.severity == "red"]
     flag_lines = "\n".join(f"- {f.title}: {f.message}" for f in red_flags) or "- No elevated signals found."
     return (
         f"{address} — {engine_output.verdict_level} risk profile for a {buyer_profile} buyer. "
-        f"True 10-year cost: ${engine_output.total_cost:,} ({above:+d}% above list). "
+        f"True ownership cost: ${engine_output.true_cost:,} ({above:+d}% above list). "
+        f"10-year cash outflow: ${engine_output.total_cost:,}. "
         f"Land transfer tax: ${kn.land_transfer_tax_total:,}. "
         f"10-year property tax: ${kn.property_tax_10y:,}. "
-        f"Mortgage (base scenario): ${kn.mortgage_cost_10y_base:,}.\n"
+        f"Mortgage interest (10yr): ${kn.mortgage_cost_10y_base:,}.\n"
         f"Elevated signals:\n{flag_lines}"
     )
 
@@ -137,20 +138,21 @@ class SynthesisService:
         law_context: list[str],
     ) -> list[dict]:
         kn = engine_output.key_numbers
-        above_list_pct = round((engine_output.total_cost - list_price) / list_price * 100)
+        above_list_pct = round((engine_output.true_cost - list_price) / list_price * 100)
 
         context = {
             "address": address,
             "list_price": int(list_price),
             "buyer_profile": buyer_profile,
             "verdict_level": engine_output.verdict_level,
-            "true_10_year_cost": engine_output.total_cost,
+            "true_cost": engine_output.true_cost,
+            "cash_outflow_10y": engine_output.total_cost,
             "above_list_percent": above_list_pct,
             "key_numbers": {
                 "land_transfer_tax": kn.land_transfer_tax_total,
                 "property_tax_10y": kn.property_tax_10y,
                 "insured_mortgage_premium": kn.insured_mortgage_premium,
-                "mortgage_10y_base": kn.mortgage_cost_10y_base,
+                "mortgage_interest_10y": kn.mortgage_cost_10y_base,
                 "transit_dividend": kn.transit_dividend,
             },
             "elevated_flags": [

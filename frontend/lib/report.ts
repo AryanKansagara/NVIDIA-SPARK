@@ -25,6 +25,7 @@ export type BreakdownPoint = {
 export type MeridianReport = {
   summary: string;
   trueCost: number;
+  cashOutflow10y: number;
   aboveListPercent: number;
   transitDividend: number;
   components: BreakdownPoint[];
@@ -174,6 +175,19 @@ function tenYearMortgageCost(
   return firstCost + secondCost;
 }
 
+function tenYearInterestCost(
+  principal: number,
+  startRate: number,
+  amortizationYears: number,
+  renewalDelta: number,
+) {
+  const secondRate = Math.max(0.5, startRate + renewalDelta);
+  const balAfterFirst = remainingBalance(principal, startRate, amortizationYears, 60);
+  const balAfterSecond = remainingBalance(balAfterFirst, secondRate, Math.max(1, amortizationYears - 5), 60);
+  const totalPayments = tenYearMortgageCost(principal, startRate, amortizationYears, renewalDelta);
+  return totalPayments - (principal - balAfterSecond);
+}
+
 function taxProjection10Y(price: number, propertyType: string, rate = PROPERTY_TAX_RATE) {
   const multiplier = AV_MULTIPLIERS[propertyType] ?? 0.70;
   const annualTax = price * multiplier * rate;
@@ -246,29 +260,22 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
     inputs.amortizationYears,
     0,
   );
-  const bearMortgage = tenYearMortgageCost(
-    mortgagePrincipal,
-    inputs.mortgageRate,
-    inputs.amortizationYears,
-    1.5,
-  );
-  const bullMortgage = tenYearMortgageCost(
-    mortgagePrincipal,
-    inputs.mortgageRate,
-    inputs.amortizationYears,
-    -0.5,
-  );
-
   const inferredTransitDividend = transitDividend(inputs.address);
   const riskAdjustments =
     (inputs.address.toLowerCase().includes("richmond") ? 29000 : 18000) +
     (inputs.buyerProfile === "investor" ? 8000 : 0);
 
-  const trueCost = downPayment + ltt + propertyTax10y + baseMortgage + riskAdjustments - inferredTransitDividend;
+  const baseInterest = tenYearInterestCost(mortgagePrincipal, inputs.mortgageRate, inputs.amortizationYears, 0);
+  const bullInterest = tenYearInterestCost(mortgagePrincipal, inputs.mortgageRate, inputs.amortizationYears, -0.5);
+  const bearInterest = tenYearInterestCost(mortgagePrincipal, inputs.mortgageRate, inputs.amortizationYears, 1.5);
+
+  const trueCost = listPrice + baseInterest + ltt + propertyTax10y + riskAdjustments - inferredTransitDividend;
+  const cashOutflow10y = downPayment + ltt + propertyTax10y + baseMortgage + riskAdjustments - inferredTransitDividend;
   const aboveListPercent = currencyRounding(((trueCost - listPrice) / listPrice) * 100);
 
   const components: BreakdownPoint[] = [
-    { label: "Mortgage", value: currencyRounding(baseMortgage), fill: "#10212B" },
+    { label: "Purchase Price", value: currencyRounding(listPrice), fill: "#10212B" },
+    { label: "Mortgage Interest (10yr)", value: currencyRounding(baseInterest), fill: "#1D3D4F" },
     { label: "Transfer Tax", value: currencyRounding(ltt), fill: "#E16B47" },
     { label: "Property Tax", value: currencyRounding(propertyTax10y), fill: "#B99239" },
     { label: "Risk Loadings", value: currencyRounding(riskAdjustments), fill: "#8C5B4A" },
@@ -323,13 +330,14 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
   return {
     summary: summarize(inputs.buyerProfile, aboveListPercent, inputs.address),
     trueCost: currencyRounding(trueCost),
+    cashOutflow10y: currencyRounding(cashOutflow10y),
     aboveListPercent,
     transitDividend: inferredTransitDividend,
     components,
     scenarios: [
-      { scenario: "Bull", cost: currencyRounding(downPayment + ltt + propertyTax10y + bullMortgage + riskAdjustments - inferredTransitDividend) },
+      { scenario: "Bull", cost: currencyRounding(listPrice + bullInterest + ltt + propertyTax10y + riskAdjustments - inferredTransitDividend) },
       { scenario: "Base", cost: currencyRounding(trueCost) },
-      { scenario: "Bear", cost: currencyRounding(downPayment + ltt + propertyTax10y + bearMortgage + riskAdjustments - inferredTransitDividend) },
+      { scenario: "Bear", cost: currencyRounding(listPrice + bearInterest + ltt + propertyTax10y + riskAdjustments - inferredTransitDividend) },
     ],
     flags: {
       red: redFlags,

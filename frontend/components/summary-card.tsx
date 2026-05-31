@@ -18,15 +18,19 @@ export function SummaryCard({ report }: SummaryCardProps) {
   return (
     <Panel className="h-full bg-ink text-white">
       <div className="space-y-6">
-        <div className="space-y-3">
+        <div className="space-y-2">
           <Pill tone="yellow">Preview Summary</Pill>
-          <h2 className="font-display text-3xl leading-tight text-white">
-            True 10-year cost: {currency(report.trueCost)}
-          </h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
+            True Ownership Cost
+          </p>
+          <p className="font-display text-5xl leading-none text-white">
+            {currency(report.trueCost)}
+          </p>
           <p className="max-w-xl text-sm leading-7 text-white/78">
             {report.summary}
           </p>
         </div>
+
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
@@ -38,21 +42,22 @@ export function SummaryCard({ report }: SummaryCardProps) {
           </div>
           <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
+              10yr Cash Outflow
+            </p>
+            <p className="mt-2 font-display text-3xl text-white">
+              {currency(report.cashOutflow10y)}
+            </p>
+          </div>
+          <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
               Transit Dividend
             </p>
             <p className="mt-2 font-display text-3xl text-white">
               {currency(report.transitDividend)}
             </p>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
-              Mortgage Cases
-            </p>
-            <p className="mt-2 font-display text-3xl text-white">
-              {report.scenarios.length}
-            </p>
-          </div>
         </div>
+
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/55">
