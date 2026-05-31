@@ -20,18 +20,43 @@ export type BreakdownPoint = {
   fill: string;
 };
 
+export type Confidence = "high" | "medium" | "low" | "unknown";
+export type Severity = "red" | "amber" | "green";
+
+export type Flag = {
+  severity: Severity;
+  title: string;
+  description: string;
+  confidence: Confidence;
+  // Optional "Say this at the table" negotiation script.
+  script?: { text: string; amount: string };
+  // Optional disclaimer shown under composite signals.
+  note?: string;
+};
+
+export type CostRow = {
+  label: string;
+  annual: number | null; // null renders as an em dash (one-time costs)
+  tenYear: number;
+  confidence: Confidence;
+};
+
+export type Verdict = "GREEN" | "YELLOW" | "RED";
+
 export type MeridianReport = {
   summary: string;
+  verdict: Verdict;
+  leverage: { low: number; high: number };
   trueCost: number;
   aboveListPercent: number;
   transitDividend: number;
   components: BreakdownPoint[];
   scenarios: ScenarioPoint[];
-  flags: {
-    red: string[];
-    yellow: string[];
-    green: string[];
-  };
+  riskFlags: Flag[];
+  compositeSignals: Flag[];
+  costRows: CostRow[];
+  totalTenYear: number;
+  coordinates: { lat: number; lng: number };
   inputs: MeridianFormState;
   keyNumbers: {
     ltt: number;
@@ -40,6 +65,9 @@ export type MeridianReport = {
     baseMortgageCost10y: number;
   };
 };
+
+// Fallback coordinate (≈ 401 Richmond St W) when no geocode is available.
+export const DEFAULT_COORDINATES = { lat: 43.6492, lng: -79.3925 };
 
 const PROPERTY_TAX_RATE = 0.00767311;
 const ASSESSED_VALUE_FACTOR = 0.6;
@@ -255,47 +283,126 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
     { label: "Transit Dividend", value: currencyRounding(-inferredTransitDividend), fill: "#2B6A57" },
   ];
 
-  const redFlags = [
-    inputs.address.toLowerCase().includes("richmond")
-      ? "Downtown core address. Heritage and permit review risk should be checked immediately."
-      : "Permit and heritage checks still need backend evidence before this can be cleared.",
-  ];
+  // ── Structured risk flags (computed from inputs) ──────────────
+  const riskFlags: Flag[] = [];
 
   if (inputs.downPaymentPercent < 20) {
-    redFlags.push(
-      `Down payment under 20% triggers default-insured borrowing. Estimated premium added to principal: ${new Intl.NumberFormat(
-        "en-CA",
-        { style: "currency", currency: "CAD", maximumFractionDigits: 0 },
-      ).format(insuredPremium)}.`,
-    );
+    riskFlags.push({
+      severity: "red",
+      title: `Default-insured mortgage — ${inputs.downPaymentPercent}% down`,
+      description: `A down payment under 20% triggers CMHC default insurance. The estimated premium of ${money(insuredPremium)} is added to your mortgage principal, so you pay interest on it for the full amortization.`,
+      confidence: "high",
+      script: {
+        text: "Because we're carrying a default-insured mortgage, the effective borrowing cost is higher than the sticker rate implies. I'd like that reflected in the price.",
+        amount: `→ Supports a ${money(insuredPremium)} adjustment`,
+      },
+    });
   }
 
-  const yellowFlags = [
-    "This frontend preview uses deterministic assumptions for transit, risk loadings, and assessment proxy until live datasets are wired.",
-    `Two 5-year mortgage terms are modeled. Renewal sensitivity is meaningful at the current starting rate of ${inputs.mortgageRate.toFixed(
-      2,
-    )}%.`,
-  ];
+  riskFlags.push({
+    severity: aboveListPercent > 40 ? "red" : "amber",
+    title: `True 10-year cost runs ${aboveListPercent}% above list`,
+    description: `Once land transfer tax, ${inputs.amortizationYears}-year mortgage servicing across two 5-year terms, and a 10-year property-tax projection are included, the real cost of ownership is materially higher than the ${money(listPrice)} list price.`,
+    confidence: "high",
+    script: {
+      text: "The list price reflects none of the carrying costs we've documented. I'd like to open from a number that accounts for the true 10-year cost.",
+      amount: `→ Documented premium: ${money(Math.max(0, trueCost - listPrice))}`,
+    },
+  });
 
-  const greenFlags = [
-    `Transit dividend currently offsets about ${new Intl.NumberFormat("en-CA", {
-      style: "currency",
-      currency: "CAD",
-      maximumFractionDigits: 0,
-    }).format(inferredTransitDividend)} versus the car-dependent 10-year baseline of ${new Intl.NumberFormat(
-      "en-CA",
-      { style: "currency", currency: "CAD", maximumFractionDigits: 0 },
-    ).format(CAR_BASELINE_10Y)}.`,
-  ];
+  riskFlags.push({
+    severity: "amber",
+    title: `Renewal exposure at ${inputs.mortgageRate.toFixed(2)}% starting rate`,
+    description: `Two 5-year terms are modeled. At renewal, the bear case (+1.5%) adds ${money(Math.max(0, bearMortgage - baseMortgage))} over the base scenario across 10 years — renewal sensitivity is meaningful at today's rate.`,
+    confidence: "medium",
+    script: {
+      text: "Rate-renewal risk is real on a 25-year amortization. I'd want pricing that gives us a cushion against the renewal scenarios.",
+      amount: `→ Bear-case delta: ${money(Math.max(0, bearMortgage - baseMortgage))}`,
+    },
+  });
 
-  if (inputs.buyerProfile === "first_time") {
-    greenFlags.push(
-      "First-time buyer benefits are active in this preview, including FHSA, RRSP HBP, and the combined land transfer tax rebate.",
-    );
+  // ── Composite signals (always Low confidence, no scripts) ─────
+  const compositeSignals: Flag[] = [];
+
+  if (inputs.downPaymentPercent < 20 || aboveListPercent > 30) {
+    compositeSignals.push({
+      severity: "amber",
+      title: "Carrying-cost pressure — Elevated",
+      description: `Factors: ${inputs.downPaymentPercent < 20 ? "insured borrowing, " : ""}${aboveListPercent > 30 ? "high cost-to-list ratio, " : ""}two-term renewal exposure.`,
+      confidence: "low",
+      note: "This is an inferred composite signal, not evidence of a specific assessment. Confidence is always Low for composite signals.",
+    });
   }
+
+  compositeSignals.push({
+    severity: inferredTransitDividend >= 80000 ? "green" : "amber",
+    title: `Transit dividend — ${inferredTransitDividend >= 80000 ? "Strong" : "Moderate"}`,
+    description: `Location signals offset about ${money(inferredTransitDividend)} versus a car-dependent 10-year baseline of ${money(CAR_BASELINE_10Y)}.`,
+    confidence: "low",
+    note: "This is a location-based signal, not a guaranteed saving. Confidence is always Low for composite signals.",
+  });
+
+  // ── Cost table rows ───────────────────────────────────────────
+  const costRows: CostRow[] = [
+    {
+      label: `Mortgage (base scenario, ${inputs.mortgageRate.toFixed(2)}%)`,
+      annual: currencyRounding(baseMortgage / 10),
+      tenYear: currencyRounding(baseMortgage),
+      confidence: "high",
+    },
+    {
+      label: "Property tax (assessed proxy, 3% growth)",
+      annual: currencyRounding(propertyTax10y / 10),
+      tenYear: currencyRounding(propertyTax10y),
+      confidence: "high",
+    },
+    {
+      label: "Land transfer tax (one-time)",
+      annual: null,
+      tenYear: currencyRounding(ltt),
+      confidence: "high",
+    },
+    {
+      label: "CMHC premium",
+      annual: null,
+      tenYear: currencyRounding(insuredPremium),
+      confidence: "high",
+    },
+    {
+      label: "Risk loadings",
+      annual: currencyRounding(riskAdjustments / 10),
+      tenYear: currencyRounding(riskAdjustments),
+      confidence: "medium",
+    },
+    {
+      label: "Transit dividend",
+      annual: null,
+      tenYear: -currencyRounding(inferredTransitDividend),
+      confidence: "medium",
+    },
+  ];
+
+  // ── Verdict + leverage (derived) ──────────────────────────────
+  const redCount = riskFlags.filter((f) => f.severity === "red").length;
+  const verdict: Verdict =
+    redCount >= 2 || aboveListPercent > 60
+      ? "RED"
+      : redCount >= 1 || aboveListPercent > 25
+        ? "YELLOW"
+        : "GREEN";
+
+  // Sum documented premiums into a conservative leverage range.
+  const documentedPremium = Math.max(0, trueCost - listPrice);
+  const leverageMid = Math.round((documentedPremium * 0.08) / 1000) * 1000;
+  const leverage = {
+    low: Math.max(5000, leverageMid),
+    high: Math.max(15000, Math.round((leverageMid * 1.4) / 1000) * 1000),
+  };
 
   return {
     summary: summarize(inputs.buyerProfile, aboveListPercent, inputs.address),
+    verdict,
+    leverage,
     trueCost: currencyRounding(trueCost),
     aboveListPercent,
     transitDividend: inferredTransitDividend,
@@ -305,11 +412,11 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
       { scenario: "Base", cost: currencyRounding(trueCost) },
       { scenario: "Bear", cost: currencyRounding(downPayment + ltt + propertyTax10y + bearMortgage + riskAdjustments - inferredTransitDividend) },
     ],
-    flags: {
-      red: redFlags,
-      yellow: yellowFlags,
-      green: greenFlags,
-    },
+    riskFlags,
+    compositeSignals,
+    costRows,
+    totalTenYear: currencyRounding(trueCost),
+    coordinates: DEFAULT_COORDINATES,
     inputs,
     keyNumbers: {
       ltt: currencyRounding(ltt),
@@ -318,4 +425,12 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
       baseMortgageCost10y: currencyRounding(baseMortgage),
     },
   };
+}
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+    maximumFractionDigits: 0,
+  }).format(value);
 }

@@ -53,7 +53,7 @@ tmp/
 temp/
 
 # RAG vector index (regenerable via `python -m app.rag.build_index`)
-backend/data/rag_index/
+
 
 # TypeScript
 *.tsbuildinfo

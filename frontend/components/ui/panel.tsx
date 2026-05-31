@@ -12,8 +12,8 @@ export function Panel({ children, className }: PanelProps) {
   return (
     <section
       className={cn(
-        "rounded-4xl border border-white/60 p-6 shadow-panel backdrop-blur md:p-8",
-        !hasCustomBg && "bg-white/70",
+        "rounded-lg border border-line p-5 backdrop-blur md:p-6",
+        !hasCustomBg && "bg-surface",
         className,
       )}
     >

@@ -1,8 +1,14 @@
-import type {
-  BreakdownPoint,
-  MeridianFormState,
-  MeridianReport,
-  ScenarioPoint,
+import {
+  DEFAULT_COORDINATES,
+  type BreakdownPoint,
+  type Confidence,
+  type CostRow,
+  type Flag,
+  type MeridianFormState,
+  type MeridianReport,
+  type ScenarioPoint,
+  type Severity,
+  type Verdict,
 } from "./report";
 
 const FILL_COLORS: Record<string, string> = {
@@ -44,6 +50,29 @@ type BackendReport = {
 
 const SCENARIO_ORDER = { bull: 0, base: 1, bear: 2 } as const;
 
+// Backend severities → UI severities (the UI uses "amber" where the backend uses "yellow").
+const SEVERITY_MAP: Record<BackendFlag["severity"], Severity> = {
+  red: "red",
+  yellow: "amber",
+  green: "green",
+  info: "green",
+};
+
+// Backend confidence isn't structured per-flag yet, so derive a sensible badge from severity.
+const CONFIDENCE_BY_SEVERITY: Record<Severity, Confidence> = {
+  red: "high",
+  amber: "medium",
+  green: "high",
+};
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianReport {
   const trueCost = backend.true_10_year_cost;
   const aboveListPercent = Math.round(((trueCost - inputs.listPrice) / inputs.listPrice) * 100);
@@ -61,29 +90,99 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
       cost: s.total_cost,
     }));
 
-  const flags: MeridianReport["flags"] = { red: [], yellow: [], green: [] };
+  // Map backend flags to structured Flags; "green"/"info" become composite signals,
+  // everything else is a risk flag.
+  const riskFlags: Flag[] = [];
+  const compositeSignals: Flag[] = [];
   for (const flag of backend.flags) {
-    const text = `${flag.title} — ${flag.message}`;
-    if (flag.severity === "red") flags.red.push(text);
-    else if (flag.severity === "yellow") flags.yellow.push(text);
-    else if (flag.severity === "green") flags.green.push(text);
+    const severity = SEVERITY_MAP[flag.severity];
+    const f: Flag = {
+      severity,
+      title: flag.title,
+      description: flag.message,
+      confidence: CONFIDENCE_BY_SEVERITY[severity],
+    };
+    if (flag.severity === "green" || flag.severity === "info") compositeSignals.push(f);
+    else riskFlags.push(f);
   }
   for (const warning of backend.warnings) {
-    flags.yellow.push(warning);
+    compositeSignals.push({
+      severity: "amber",
+      title: "Data note",
+      description: warning,
+      confidence: "low",
+    });
   }
+
+  const costRows: CostRow[] = [
+    {
+      label: "Mortgage (base scenario)",
+      annual: Math.round(backend.key_numbers.mortgage_cost_10y_base / 10),
+      tenYear: backend.key_numbers.mortgage_cost_10y_base,
+      confidence: "high",
+    },
+    {
+      label: "Property tax (10-year)",
+      annual: Math.round(backend.key_numbers.property_tax_10y / 10),
+      tenYear: backend.key_numbers.property_tax_10y,
+      confidence: "high",
+    },
+    {
+      label: "Land transfer tax (one-time)",
+      annual: null,
+      tenYear: backend.key_numbers.land_transfer_tax_total,
+      confidence: "high",
+    },
+    {
+      label: "CMHC premium",
+      annual: null,
+      tenYear: backend.key_numbers.insured_mortgage_premium,
+      confidence: "high",
+    },
+    {
+      label: "Transit dividend",
+      annual: null,
+      tenYear: -backend.key_numbers.transit_dividend,
+      confidence: "medium",
+    },
+  ];
+
+  const redCount = riskFlags.filter((f) => f.severity === "red").length;
+  const verdict: Verdict =
+    redCount >= 2 || aboveListPercent > 60
+      ? "RED"
+      : redCount >= 1 || aboveListPercent > 25
+        ? "YELLOW"
+        : "GREEN";
+
+  const documentedPremium = Math.max(0, trueCost - inputs.listPrice);
+  const leverageMid = Math.round((documentedPremium * 0.08) / 1000) * 1000;
+  const leverage = {
+    low: Math.max(5000, leverageMid),
+    high: Math.max(15000, Math.round((leverageMid * 1.4) / 1000) * 1000),
+  };
 
   const summary =
     backend.summary_text ??
-    `${backend.property.normalized_address} — estimated true 10-year cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
+    `${backend.property.normalized_address} — estimated true 10-year cost is ${money(trueCost)}, about ${aboveListPercent}% above list price.`;
+
+  const lat = backend.property.latitude || DEFAULT_COORDINATES.lat;
+  const lng = backend.property.longitude || DEFAULT_COORDINATES.lng;
 
   return {
     summary,
+    verdict,
+    leverage,
     trueCost,
     aboveListPercent,
     transitDividend: backend.key_numbers.transit_dividend,
     components,
     scenarios,
-    flags,
+    riskFlags,
+    compositeSignals,
+    costRows,
+    totalTenYear: trueCost,
+    coordinates: { lat, lng },
     inputs,
     keyNumbers: {
       ltt: backend.key_numbers.land_transfer_tax_total,

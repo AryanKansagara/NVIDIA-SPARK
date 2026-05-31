@@ -2,8 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Meridian design tokens — "Mercury fintech" system.
+  Dark mode is the default; `.light-mode` on <html> swaps to the warm light theme.
+  These CSS variables are the single source of truth; tailwind.config.ts maps
+  utility colors onto them so classes switch automatically with the theme.
+*/
 :root {
+  color-scheme: dark;
+
+  /* Background hierarchy */
+  --bg: #171721;
+  --surface: #1e1e2a;
+  --surface-raised: #272735;
+  --surface-frosted: rgba(112, 115, 147, 0.22);
+
+  /* Borders */
+  --border: rgba(175, 178, 206, 0.36);
+  --border-faint: rgba(175, 178, 206, 0.14);
+  --border-focus: rgba(156, 180, 232, 0.5);
+
+  /* Text */
+  --text-primary: #edede3;
+  --text-secondary: #c3c3cc;
+  --text-muted: #70707d;
+
+  /* Interactive accent */
+  --accent: #5266eb;
+  --accent-tint: rgba(156, 180, 232, 0.2);
+  --accent-subtle: rgba(82, 102, 235, 0.12);
+  --accent-light: #cdddff;
+
+  /* Semantic */
+  --green: #34d399;
+  --green-tint: rgba(52, 211, 153, 0.12);
+  --amber: #fbbf24;
+  --amber-tint: rgba(251, 191, 36, 0.12);
+  --red: #f87171;
+  --red-tint: rgba(248, 113, 113, 0.12);
+
+  /* Motion */
+  --ease: cubic-bezier(0, 0, 0.6, 1);
+  --dur: 0.5s;
+
+  /* Page background treatment (dark: flat) */
+  --page-bg: var(--bg);
+}
+
+.light-mode {
   color-scheme: light;
+
+  --bg: #f5efe2;
+  --surface: rgba(255, 255, 255, 0.8);
+  --surface-raised: rgba(245, 242, 235, 0.9);
+  --surface-frosted: rgba(200, 190, 170, 0.1);
+
+  --border: rgba(130, 110, 80, 0.18);
+  --border-faint: rgba(130, 110, 80, 0.1);
+  --border-focus: rgba(82, 102, 235, 0.5);
+
+  --text-primary: #1a1f2e;
+  --text-secondary: #3a3f52;
+  --text-muted: #6b6f7a;
+
+  --accent-tint: rgba(82, 102, 235, 0.12);
+  --accent-light: #4a56c8;
+
+  /* Warm cream landing treatment from the prototype */
+  --page-bg:
+    radial-gradient(circle at 2% 2%, rgba(225, 107, 71, 0.15) 0%, transparent 28%),
+    radial-gradient(circle at 86% 10%, rgba(185, 146, 57, 0.15) 0%, transparent 24%),
+    linear-gradient(180deg, #f5efe2 0%, #eaf4f1 52%, #d7e7e2 100%);
+}
+
+/* Warm gradient stays fixed while scrolling, per prototype. */
+.light-mode body {
+  background-attachment: fixed;
+}
+
+/* Frosted-glass card surfaces in light mode (prototype parity). */
+.light-mode .frosted {
+  background: rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Light-mode confidence badge colors (stronger contrast on cream). */
+.light-mode .badge-high {
+  color: #0f8a5f;
+  background: rgba(52, 211, 153, 0.14);
+}
+.light-mode .badge-medium {
+  color: #9a6d00;
+  background: rgba(251, 191, 36, 0.14);
+}
+.light-mode .badge-low {
+  color: #c53030;
+  background: rgba(248, 113, 113, 0.14);
+}
+.light-mode .badge-unknown {
+  color: #4a56c8;
+  background: rgba(82, 102, 235, 0.1);
 }
 
 * {
@@ -17,12 +116,13 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(225, 107, 71, 0.18), transparent 28%),
-    radial-gradient(circle at 85% 12%, rgba(185, 146, 57, 0.18), transparent 24%),
-    linear-gradient(180deg, #f5efe2 0%, #eaf4f1 52%, #d7e7e2 100%);
-  color: #10212b;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-family: var(--font, "DM Sans"), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 
 a {
@@ -30,22 +130,83 @@ a {
   text-decoration: none;
 }
 
-.grid-noise {
-  position: relative;
-}
-
-.grid-noise::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(16, 33, 43, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(16, 33, 43, 0.045) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent 85%);
+.font-mono {
+  font-family: var(--font-mono, "Geist Mono"), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .text-balance {
   text-wrap: balance;
+}
+
+/* ── Keyframes (ported from the prototype) ───────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(82, 102, 235, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(82, 102, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(82, 102, 235, 0);
+  }
+}
+
+@keyframes chatSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes typingBounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-5px);
+  }
+}
+
+.screen-fade-in {
+  animation: fadeIn 0.4s var(--ease) both;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.5s infinite;
+}
+
+.animate-chat-slide-in {
+  animation: chatSlideIn 0.25s var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
 }
