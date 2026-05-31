@@ -9,7 +9,7 @@ export function Hero() {
       <div className="relative space-y-6">
         <div className="flex flex-wrap items-center gap-3">
           <Pill>Toronto Housing Intelligence</Pill>
-          <Pill tone="green">Local-first on GX10</Pill>
+          <Pill tone="green">Local-first on DGX Spark GB10</Pill>
         </div>
         <div className="max-w-4xl space-y-4">
           <p className="font-body text-sm font-semibold uppercase tracking-[0.3em] text-slate">

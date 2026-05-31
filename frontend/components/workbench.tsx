@@ -50,17 +50,19 @@ export function Workbench() {
 
   return (
     <>
-      <section
-        className={`grid gap-6 lg:grid-cols-[0.9fr_1.1fr] transition-opacity ${isPending ? "opacity-60 pointer-events-none" : ""}`}
-      >
-        <InputCard
-          initialValues={report.inputs}
-          onSubmit={handleSubmit}
-          onRefreshPipeline={handleRefreshPipeline}
-          pipelineStatus={pipelineStatus}
-          isRefreshing={isRefreshing}
-        />
-        <SummaryCard report={report} />
+      <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        {/* Input card dims while pending so user knows to wait */}
+        <div className={`transition-opacity duration-300 ${isPending ? "opacity-50 pointer-events-none" : ""}`}>
+          <InputCard
+            initialValues={report.inputs}
+            onSubmit={handleSubmit}
+            onRefreshPipeline={handleRefreshPipeline}
+            pipelineStatus={pipelineStatus}
+            isRefreshing={isRefreshing}
+          />
+        </div>
+        {/* Summary card shows its own generating skeleton */}
+        <SummaryCard report={report} isGenerating={isPending} />
       </section>
       {error && (
         <p className="rounded-xl border border-[#EDB6A4] bg-[#F9DDD4] px-4 py-3 text-sm text-[#9A381F]">

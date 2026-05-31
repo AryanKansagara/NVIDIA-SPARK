@@ -1,4 +1,4 @@
-import { Compass, Cpu, Landmark } from "lucide-react";
+import { Compass, Landmark, Sparkles } from "lucide-react";
 
 export function Header() {
   return (
@@ -14,14 +14,16 @@ export function Header() {
           </p>
         </div>
       </div>
+
       <div className="flex flex-wrap gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate">
         <div className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/70 px-4 py-2">
           <Landmark className="h-4 w-4 text-ember" />
           Toronto open data
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/70 px-4 py-2">
-          <Cpu className="h-4 w-4 text-moss" />
-          GX10 local inference
+        {/* NVIDIA badge with glow */}
+        <div className="nvidia-badge-glow inline-flex items-center gap-2 rounded-full border border-moss/40 bg-gradient-to-r from-moss/10 to-mist/60 px-4 py-2">
+          <Sparkles className="h-4 w-4 text-moss" />
+          <span className="text-moss">Nemotron · GB10 · NIM</span>
         </div>
       </div>
     </header>

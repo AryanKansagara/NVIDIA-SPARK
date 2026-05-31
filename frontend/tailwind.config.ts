@@ -40,10 +40,20 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateY(18px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "slide-up": {
+          "0%": { opacity: "0", transform: "translateY(10px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         drift: "drift 12s ease-in-out infinite",
         rise: "rise 700ms ease-out both",
+        "fade-in": "fade-in 400ms ease-out both",
+        "slide-up": "slide-up 500ms ease-out both",
       },
     },
   },
