@@ -25,6 +25,17 @@ class EngineOutput:
     scenarios: list[ScenarioCost]
     flags: list[RiskFlag]
     key_numbers: KeyNumbers
+    horizon_totals: dict[str, int]  # {"5y": .., "10y": .., "15y": ..}
+
+
+HORIZONS = (5, 10, 15)
+
+# Statuses that do NOT carry heritage risk (no designation on the register).
+_HERITAGE_NOT_SENSITIVE = {"no_match", "no_match_preview", "removed", "duckdb-empty"}
+
+
+def _heritage_sensitive(status: str) -> bool:
+    return status not in _HERITAGE_NOT_SENSITIVE
 
 
 class ReportEngine:
@@ -39,7 +50,6 @@ class ReportEngine:
         )
         land_transfer_tax_total = max(0, land_transfer_tax_total)
 
-        property_tax_10y = round(self._tax_projection_10y(payload.list_price))
         insured_mortgage_premium = round(
             self._insured_premium(payload.list_price, payload.down_payment_percent)
         )
@@ -49,46 +59,45 @@ class ReportEngine:
             + insured_mortgage_premium
         )
 
-        mortgage_base = round(
-            self._ten_year_mortgage_cost(
-                principal,
-                payload.mortgage_rate,
-                payload.amortization_years,
-                renewal_delta=0.0,
-            )
-        )
-        mortgage_bull = round(
-            self._ten_year_mortgage_cost(
-                principal,
-                payload.mortgage_rate,
-                payload.amortization_years,
-                renewal_delta=-0.5,
-            )
-        )
-        mortgage_bear = round(
-            self._ten_year_mortgage_cost(
-                principal,
-                payload.mortgage_rate,
-                payload.amortization_years,
-                renewal_delta=1.5,
-            )
-        )
+        down_payment = round(payload.list_price * (payload.down_payment_percent / 100))
+        transit_dividend_10y = self._transit_dividend(payload.address)
 
+        def horizon_total(years: int, renewal_delta: float = 0.0) -> int:
+            property_tax = self._tax_projection(payload.list_price, years)
+            mortgage = self._mortgage_cost(
+                principal, payload.mortgage_rate, payload.amortization_years, renewal_delta, years
+            )
+            # Year-scaled loadings: flood loading is annual; transit dividend is a 10-yr figure.
+            risk = (
+                payload.flood.annual_risk_loading * years
+                + (12000 if _heritage_sensitive(payload.heritage.status) else 0)
+                + (17000 if payload.development.intensity == "high" else 7000 if payload.development.intensity == "medium" else 0)
+            )
+            transit = transit_dividend_10y * (years / 10)
+            return round(
+                down_payment + land_transfer_tax_total + property_tax + mortgage + risk - transit
+            )
+
+        horizon_totals = {f"{y}y": horizon_total(y) for y in HORIZONS}
+
+        # 10-year figures stay the canonical headline (back-compat).
+        property_tax_10y = round(self._tax_projection(payload.list_price, 10))
+        mortgage_base = round(
+            self._mortgage_cost(principal, payload.mortgage_rate, payload.amortization_years, 0.0, 10)
+        )
         risk_adjustments = round(
             (payload.flood.annual_risk_loading * 10)
-            + (12000 if payload.heritage.status != "no_match_preview" else 0)
+            + (12000 if _heritage_sensitive(payload.heritage.status) else 0)
             + (17000 if payload.development.intensity == "high" else 7000 if payload.development.intensity == "medium" else 0)
         )
+        transit_dividend = transit_dividend_10y
+        total_cost = horizon_totals["10y"]
 
-        down_payment = round(payload.list_price * (payload.down_payment_percent / 100))
-        transit_dividend = self._transit_dividend(payload.address)
-        total_cost = round(
-            down_payment
-            + land_transfer_tax_total
-            + property_tax_10y
-            + mortgage_base
-            + risk_adjustments
-            - transit_dividend
+        mortgage_bull = round(
+            self._mortgage_cost(principal, payload.mortgage_rate, payload.amortization_years, -0.5, 10)
+        )
+        mortgage_bear = round(
+            self._mortgage_cost(principal, payload.mortgage_rate, payload.amortization_years, 1.5, 10)
         )
 
         components = [
@@ -139,6 +148,7 @@ class ReportEngine:
             scenarios=scenarios,
             flags=flags,
             key_numbers=key_numbers,
+            horizon_totals=horizon_totals,
         )
 
     def _flags(
@@ -148,7 +158,7 @@ class ReportEngine:
         transit_dividend: int,
     ) -> list[RiskFlag]:
         flags: list[RiskFlag] = []
-        if payload.heritage.status != "no_match_preview":
+        if _heritage_sensitive(payload.heritage.status):
             flags.append(
                 RiskFlag(
                     severity="red",
@@ -267,34 +277,42 @@ class ReportEngine:
         factor_total = (1 + monthly_rate) ** total_months
         return principal * ((factor_total - factor_paid) / (factor_total - 1))
 
-    def _ten_year_mortgage_cost(
+    def _mortgage_cost(
         self,
         principal: float,
         start_rate: float,
         amortization_years: int,
         renewal_delta: float,
+        horizon_years: int,
     ) -> float:
-        first_term_months = 60
-        second_term_months = 60
-        first_payment = self._monthly_payment(principal, start_rate, amortization_years)
-        first_cost = first_payment * first_term_months
-        remaining = self._remaining_balance(
-            principal,
-            start_rate,
-            amortization_years,
-            first_term_months,
-        )
-        second_rate = max(0.5, start_rate + renewal_delta)
-        second_payment = self._monthly_payment(
-            remaining,
-            second_rate,
-            max(1, amortization_years - 5),
-        )
-        return first_cost + second_payment * second_term_months
+        """Mortgage cost over `horizon_years` using rolling 60-month (5-yr) terms.
 
-    def _tax_projection_10y(self, list_price: float) -> float:
+        The starting rate applies to the first term; each renewal adds
+        `renewal_delta` (floored at 0.5%). At 10 years this matches the original
+        two-term model exactly.
+        """
+        months_left = horizon_years * 12
+        balance = principal
+        amort_left = float(amortization_years)
+        rate = start_rate
+        cost = 0.0
+        term = 0
+        while months_left > 0 and balance > 0:
+            if term > 0:
+                rate = max(0.5, rate + renewal_delta)
+            months = min(60, months_left)
+            payment = self._monthly_payment(balance, rate, max(1.0, amort_left))
+            cost += payment * months
+            balance = self._remaining_balance(balance, rate, max(1.0, amort_left), months)
+            amort_left -= months / 12
+            months_left -= months
+            term += 1
+        return cost
+
+    def _tax_projection(self, list_price: float, years: int) -> float:
         annual_tax = list_price * self.settings.assessed_value_factor * self.settings.property_tax_rate
-        factor = ((1 + self.settings.property_tax_growth_rate) ** 10 - 1) / self.settings.property_tax_growth_rate
+        g = self.settings.property_tax_growth_rate
+        factor = ((1 + g) ** years - 1) / g
         return annual_tax * factor
 
     def _transit_dividend(self, address: str) -> int:

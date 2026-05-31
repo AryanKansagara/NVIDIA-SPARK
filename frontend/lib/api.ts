@@ -4,8 +4,29 @@ import type {
   MeridianFormState,
   MeridianReport,
   MonteCarloDistribution,
+  PipelineStep,
   ScenarioPoint,
 } from "./report";
+
+type BackendMonteCarlo = {
+  p10: number;
+  p50: number;
+  p90: number;
+  mean: number;
+  trajectories_sampled: number;
+  elapsed_ms: number | null;
+};
+
+function mapMonteCarlo(mc: BackendMonteCarlo): MonteCarloDistribution {
+  return {
+    p10: mc.p10,
+    p50: mc.p50,
+    p90: mc.p90,
+    mean: mc.mean,
+    trajectoriesSampled: mc.trajectories_sampled,
+    elapsedMs: mc.elapsed_ms,
+  };
+}
 
 const FILL_COLORS: Record<string, string> = {
   mortgage_base: "#10212B",
@@ -42,14 +63,10 @@ type BackendReport = {
     transit_dividend: number;
   };
   summary_text: string | null;
-  monte_carlo: {
-    p10: number;
-    p50: number;
-    p90: number;
-    mean: number;
-    trajectories_sampled: number;
-    elapsed_ms: number | null;
-  } | null;
+  monte_carlo: BackendMonteCarlo | null;
+  monte_carlo_horizons?: Record<string, BackendMonteCarlo>;
+  horizon_costs?: Record<string, number>;
+  pipeline_trace?: { name: string; started_ms: number; elapsed_ms: number; parallel_group: number }[];
   map_geometry: {
     property_lat: number;
     property_lon: number;
@@ -102,15 +119,20 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
     `${backend.property.normalized_address} — estimated true 10-year cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
 
   const monteCarlo: MonteCarloDistribution | null = backend.monte_carlo
-    ? {
-        p10: backend.monte_carlo.p10,
-        p50: backend.monte_carlo.p50,
-        p90: backend.monte_carlo.p90,
-        mean: backend.monte_carlo.mean,
-        trajectoriesSampled: backend.monte_carlo.trajectories_sampled,
-        elapsedMs: backend.monte_carlo.elapsed_ms,
-      }
+    ? mapMonteCarlo(backend.monte_carlo)
     : null;
+
+  const monteCarloHorizons: Record<string, MonteCarloDistribution> = {};
+  for (const [horizon, mc] of Object.entries(backend.monte_carlo_horizons ?? {})) {
+    monteCarloHorizons[horizon] = mapMonteCarlo(mc);
+  }
+
+  const pipelineTrace: PipelineStep[] = (backend.pipeline_trace ?? []).map((s) => ({
+    name: s.name,
+    startedMs: s.started_ms,
+    elapsedMs: s.elapsed_ms,
+    parallelGroup: s.parallel_group,
+  }));
 
   const mapGeometry: MapGeometry | null = backend.map_geometry
     ? {
@@ -148,7 +170,10 @@ function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianR
       baseMortgageCost10y: backend.key_numbers.mortgage_cost_10y_base,
     },
     monteCarlo,
+    monteCarloHorizons,
+    horizonCosts: backend.horizon_costs ?? {},
     mapGeometry,
+    pipelineTrace,
   };
 }
 
@@ -172,4 +197,102 @@ export async function fetchReport(inputs: MeridianFormState): Promise<MeridianRe
   }
 
   return mapReport(await res.json(), inputs);
+}
+
+// ---- Profile -------------------------------------------------------------
+export type Profile = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  monthly_income?: number | null;
+};
+
+export async function getProfile(): Promise<Profile> {
+  const res = await fetch("/api/v1/profile");
+  if (!res.ok) throw new Error(`Profile API ${res.status}`);
+  return res.json();
+}
+
+export async function saveProfile(profile: Profile): Promise<Profile> {
+  const res = await fetch("/api/v1/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) throw new Error(`Profile save ${res.status}`);
+  return res.json();
+}
+
+// ---- Saved reports -------------------------------------------------------
+export type SavedReportSummary = {
+  report_id: string;
+  address: string | null;
+  list_price: number | null;
+  buyer_profile: string | null;
+  true_10y_cost: number | null;
+  created_at: string;
+};
+
+export async function saveReport(report: MeridianReport): Promise<string> {
+  // Persist a backend-shaped payload so it can be re-rendered later.
+  const payload = {
+    property: { address: report.inputs.address, normalized_address: report.inputs.address },
+    list_price: report.inputs.listPrice,
+    buyer_profile: report.inputs.buyerProfile,
+    true_10_year_cost: report.trueCost,
+    summary_text: report.summary,
+    horizon_costs: report.horizonCosts,
+  };
+  const res = await fetch("/api/v1/reports/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Save report ${res.status}`);
+  return (await res.json()).report_id;
+}
+
+export async function listReports(): Promise<SavedReportSummary[]> {
+  const res = await fetch("/api/v1/reports");
+  if (!res.ok) throw new Error(`List reports ${res.status}`);
+  return res.json();
+}
+
+// ---- Chat ----------------------------------------------------------------
+export type ChatSource = { text: string; source: string; score?: number | null };
+export type ChatReply = { reply: string; sources: ChatSource[] };
+
+export async function sendChat(
+  sessionId: string,
+  message: string,
+  webSearch = false,
+  reportContext?: string,
+): Promise<ChatReply> {
+  const res = await fetch("/api/v1/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
+      web_search: webSearch,
+      report_context: reportContext,
+    }),
+  });
+  if (!res.ok) throw new Error(`Chat API ${res.status}`);
+  const data = await res.json();
+  return { reply: data.reply, sources: data.sources ?? [] };
+}
+
+// ---- Health --------------------------------------------------------------
+export type HealthStatus = {
+  status: string;
+  llm_local: boolean;
+  embeddings_local: boolean;
+  model: string;
+};
+
+export async function getHealth(): Promise<HealthStatus> {
+  const res = await fetch("/api/v1/health");
+  if (!res.ok) throw new Error(`Health API ${res.status}`);
+  return res.json();
 }

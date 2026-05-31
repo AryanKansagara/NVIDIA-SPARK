@@ -10,7 +10,7 @@ from app.services.engine.report_engine import EngineOutput
 _SYSTEM_PROMPT = """\
 You are Meridian's synthesis agent. You receive JSON about a Toronto property's true 10-year cost of ownership. Write a 3-paragraph buyer summary — direct, factual, no financial advice.
 
-Paragraph 1 (verdict): State the true 10-year cost, how far above list price that is as a percentage, and the single most important risk flag. If Monte Carlo simulation data is provided, state the P10/P90 range: "Across 10,000 simulations, outcomes range from $P10 to $P90."
+Paragraph 1 (verdict): State the true 10-year cost, how far above list price that is as a percentage, and the single most important risk flag. If Monte Carlo simulation data is provided, state the 10-year P10/P90 range: "Across 10,000 simulations, outcomes range from $P10 to $P90." If 5-year and 15-year horizons are provided, note how the cost grows across the 5/10/15-year horizons.
 Paragraph 2 (cost drivers): Explain the 2 largest costs beyond the mortgage in plain English, using the exact dollar figures provided.
 Paragraph 3 (action): Give 2 specific steps this buyer should take before closing, based on their profile and the flags present. If relevant land-law excerpts are provided, reference specific legal obligations the buyer should be aware of.
 
@@ -33,13 +33,15 @@ class SynthesisService:
         development: DevelopmentEvidence,
         law_context: list[str] | None = None,
         monte_carlo: MonteCarloResult | None = None,
+        horizons: dict[str, MonteCarloResult] | None = None,
+        profile: dict | None = None,
     ) -> str | None:
         if not self.settings.nim_enabled:
             return None
         try:
             return await self._call_nim(
                 address, list_price, buyer_profile, engine_output, heritage, flood, development,
-                law_context or [], monte_carlo,
+                law_context or [], monte_carlo, horizons or {}, profile or {},
             )
         except Exception as exc:
             import logging
@@ -57,6 +59,8 @@ class SynthesisService:
         development: DevelopmentEvidence,
         law_context: list[str],
         monte_carlo: MonteCarloResult | None,
+        horizons: dict[str, MonteCarloResult],
+        profile: dict,
     ) -> str:
         kn = engine_output.key_numbers
         above_list_pct = round((engine_output.total_cost - list_price) / list_price * 100)
@@ -98,6 +102,16 @@ class SynthesisService:
                 "mean": monte_carlo.mean,
             }
 
+        if horizons:
+            context["horizon_simulations"] = {
+                h: {"p10": r.p10, "p50": r.p50, "p90": r.p90} for h, r in horizons.items()
+            }
+
+        if profile:
+            buyer_situation = {k: v for k, v in profile.items() if v not in (None, "")}
+            if buyer_situation:
+                context["buyer_situation"] = buyer_situation
+
         model = self.settings.nim_model
 
         payload = {
@@ -109,28 +123,16 @@ class SynthesisService:
             "max_tokens": 450,
             "temperature": 0.3,
             "stream": False,
+            # Nemotron-3 Nano is a reasoning model; disable thinking so `content`
+            # is the final narrative, not the chain-of-thought.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
-        # Try local NIM container first; fall back to hosted NVIDIA API
+        # Local-only: the on-device Nemotron LLM (vLLM on :8080). No hosted fallback.
         async with httpx.AsyncClient(timeout=self.settings.nim_timeout_seconds) as client:
-            try:
-                resp = await client.post(
-                    f"{self.settings.nim_local_url}/chat/completions",
-                    json=payload,
-                )
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"].strip()
-            except Exception:
-                pass  # local container not running — fall through to hosted API
-
-            headers = {}
-            if self.settings.nim_api_key:
-                headers["Authorization"] = f"Bearer {self.settings.nim_api_key}"
-
             resp = await client.post(
-                f"{self.settings.nim_base_url}/chat/completions",
+                f"{self.settings.nim_local_url}/chat/completions",
                 json=payload,
-                headers=headers,
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()

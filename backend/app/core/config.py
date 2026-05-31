@@ -17,12 +17,13 @@ class Settings(BaseSettings):
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
     flood_risk_annual_loading: int = 3500
-    nim_local_url: str = "http://localhost:8080/v1"   # local NIM container (primary)
-    nim_base_url: str = "https://integrate.api.nvidia.com/v1"  # hosted API (fallback)
-    nim_model: str = "nvidia/nemotron-nano-12b-v2-vl"
+    # Local-only Nemotron LLM (vLLM, OpenAI-compatible). No hosted API, no API key.
+    nim_local_url: str = "http://localhost:8080/v1"
+    nim_model: str = "nemotron-3-nano-30b-a3b"
     nim_enabled: bool = True
-    nim_timeout_seconds: float = 60.0
-    nim_api_key: str = ""
+    nim_timeout_seconds: float = 120.0
+    # Local Nemotron RAG embedding server (OpenAI-compatible /embeddings).
+    embedding_local_url: str = "http://localhost:8081/v1"
     rag_enabled: bool = True
     rag_embedding_model: str = "nvidia/llama-3.2-nv-embedqa-1b-v2"
     rag_vector_store_path: str = "data/vector_store"
@@ -30,6 +31,18 @@ class Settings(BaseSettings):
     rag_n_results: int = 3
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 100
+    # Local NVIDIA reranker (vLLM `--task score`, OpenAI-compatible /rerank on :8082).
+    # Over-fetch rag_candidate_k from the vector store, rerank, keep rag_n_results.
+    # Degrades gracefully to vector-similarity order if the reranker is unreachable.
+    rag_rerank_enabled: bool = True
+    rerank_url: str = "http://localhost:8082/v1"
+    rerank_model: str = "nvidia/llama-3.2-nv-rerankqa-1b-v2"
+    rag_candidate_k: int = 12
+    # Opt-in real-time web search (DuckDuckGo, no API key). Per-request toggle from
+    # the chat UI; this flag gates the capability server-side. Only the query string
+    # leaves the device — never the buyer's profile or financials.
+    web_search_enabled: bool = True
+    web_search_max_results: int = 4
     trca_flood_query_url: str = (
         "https://services6.arcgis.com/jr7MHa3BWLD2qqOB/arcgis/rest/services/"
         "Floodline_TRCA_Polygon/FeatureServer/0/query"
@@ -40,8 +53,8 @@ class Settings(BaseSettings):
     # GPU
     gpu_enabled: bool = True
     monte_carlo_n_sims: int = 10_000
-    # LLM upgrade
-    nemotron_model: str = "nvidia/nemotron-nano-12b-v2-vl"
+    # LLM
+    nemotron_model: str = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
     nemo_retriever_enabled: bool = False
     nemo_retriever_url: str = ""
 

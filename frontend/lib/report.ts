@@ -29,6 +29,13 @@ export type MonteCarloDistribution = {
   elapsedMs: number | null;
 };
 
+export type PipelineStep = {
+  name: string;
+  startedMs: number;
+  elapsedMs: number;
+  parallelGroup: number;
+};
+
 export type CommunityInsight = {
   headline: string;
   medianEstimate: number;
@@ -67,8 +74,13 @@ export type MeridianReport = {
     baseMortgageCost10y: number;
   };
   monteCarlo: MonteCarloDistribution | null;
+  monteCarloHorizons: Record<string, MonteCarloDistribution>;
+  horizonCosts: Record<string, number>;
   mapGeometry: MapGeometry | null;
+  pipelineTrace: PipelineStep[];
 };
+
+export const HORIZONS = [5, 10, 15] as const;
 
 const PROPERTY_TAX_RATE = 0.00767311;
 const ASSESSED_VALUE_FACTOR = 0.6;
@@ -187,11 +199,35 @@ function tenYearMortgageCost(
 }
 
 function taxProjection10Y(price: number) {
-  const annualTax = price * ASSESSED_VALUE_FACTOR * PROPERTY_TAX_RATE;
-  const factor =
-    (Math.pow(1 + PROPERTY_TAX_GROWTH, 10) - 1) / PROPERTY_TAX_GROWTH;
+  return taxProjection(price, 10);
+}
 
+function taxProjection(price: number, years: number) {
+  const annualTax = price * ASSESSED_VALUE_FACTOR * PROPERTY_TAX_RATE;
+  const factor = (Math.pow(1 + PROPERTY_TAX_GROWTH, years) - 1) / PROPERTY_TAX_GROWTH;
   return annualTax * factor;
+}
+
+// Mirror of backend ReportEngine._mortgage_cost — rolling 60-month terms.
+function mortgageCostHorizon(
+  principal: number,
+  startRate: number,
+  amortizationYears: number,
+  horizonYears: number,
+) {
+  let monthsLeft = horizonYears * 12;
+  let balance = principal;
+  let amortLeft = amortizationYears;
+  let cost = 0;
+  while (monthsLeft > 0 && balance > 0) {
+    const months = Math.min(60, monthsLeft);
+    const payment = monthlyPayment(balance, startRate, Math.max(1, amortLeft));
+    cost += payment * months;
+    balance = remainingBalance(balance, startRate, Math.max(1, amortLeft), months);
+    amortLeft -= months / 12;
+    monthsLeft -= months;
+  }
+  return cost;
 }
 
 function transitDividend(address: string) {
@@ -276,6 +312,16 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
   const trueCost = downPayment + ltt + propertyTax10y + baseMortgage + riskAdjustments - inferredTransitDividend;
   const aboveListPercent = currencyRounding(((trueCost - listPrice) / listPrice) * 100);
 
+  // Deterministic 5/10/15-year anchors (mirrors backend horizon_totals).
+  const horizonCosts: Record<string, number> = {};
+  for (const years of HORIZONS) {
+    const tax = taxProjection(listPrice, years);
+    const mortgage = mortgageCostHorizon(mortgagePrincipal, inputs.mortgageRate, inputs.amortizationYears, years);
+    const risk = riskAdjustments * (years / 10);
+    const transit = inferredTransitDividend * (years / 10);
+    horizonCosts[`${years}y`] = currencyRounding(downPayment + ltt + tax + mortgage + risk - transit);
+  }
+
   const components: BreakdownPoint[] = [
     { label: "Mortgage", value: currencyRounding(baseMortgage), fill: "#10212B" },
     { label: "Transfer Tax", value: currencyRounding(ltt), fill: "#E16B47" },
@@ -347,6 +393,9 @@ export function buildPreviewReport(inputs: MeridianFormState): MeridianReport {
       baseMortgageCost10y: currencyRounding(baseMortgage),
     },
     monteCarlo: null,
+    monteCarloHorizons: {},
+    horizonCosts,
     mapGeometry: null,
+    pipelineTrace: [],
   };
 }

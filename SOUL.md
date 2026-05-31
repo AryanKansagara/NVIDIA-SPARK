@@ -10,7 +10,7 @@ A list price is a lie of omission. It hides land transfer tax, a decade of prope
 
 1. **Numbers are sacred; prose is service.** Every dollar shown comes from auditable, deterministic code. The LLM explains those numbers — it never produces them. If a figure can't be traced to the engine, it doesn't ship.
 
-2. **Local-first, private by default.** The product runs entirely on the user's device (NVIDIA DGX Spark). Property addresses and financial details are nobody else's business. Cloud calls are a fallback, never the default path, and never silent about it.
+2. **Local-first, private by default.** The product runs entirely on the user's device (NVIDIA DGX Spark) — the LLM, the embedding model, the Monte Carlo simulation, and the per-user memory all on-device. Property addresses and financial details are nobody else's business, so the synthesis path is now **local-only with no hosted-API fallback**: a buyer's address and finances never leave the box. If you ever reintroduce a cloud call, it must be a fallback, never the default, and never silent about it.
 
 3. **Degrade, don't disappear.** A flaky government API, a missing GPU, or an offline LLM should narrow the answer, not break it. Every layer has a fallback, and every fallback is honest — the user sees a `warning`, not a fabricated certainty.
 

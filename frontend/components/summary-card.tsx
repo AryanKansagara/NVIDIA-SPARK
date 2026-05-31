@@ -15,6 +15,9 @@ import type { MeridianReport } from "@/lib/report";
 type SummaryCardProps = {
   report: MeridianReport;
   isGenerating?: boolean;
+  horizon?: number;
+  onSave?: () => void;
+  saveStatus?: "idle" | "saving" | "saved" | "error";
 };
 
 function currency(value: number) {
@@ -236,18 +239,44 @@ function KeyFigure({ label, value }: { label: string; value: string }) {
 }
 
 /* ── Main component ───────────────────────────────────────────── */
-export function SummaryCard({ report, isGenerating = false }: SummaryCardProps) {
+export function SummaryCard({
+  report,
+  isGenerating = false,
+  horizon = 10,
+  onSave,
+  saveStatus = "idle",
+}: SummaryCardProps) {
   const isLLMContent = report.summary.includes("**");
+  const horizonKey = `${horizon}y`;
+  const horizonCost = report.horizonCosts[horizonKey] ?? report.trueCost;
+  const horizonMc = report.monteCarloHorizons[horizonKey] ?? report.monteCarlo;
 
   return (
     <Panel className="h-full">
       <div className="space-y-6">
         {/* Header */}
         <div className="space-y-4">
-          <Pill tone="yellow">Summary</Pill>
+          <div className="flex items-center justify-between gap-2">
+            <Pill tone="yellow">Summary</Pill>
+            {onSave && (
+              <button
+                onClick={onSave}
+                disabled={saveStatus === "saving"}
+                className="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:bg-ink hover:text-mist disabled:opacity-50"
+              >
+                {saveStatus === "saving"
+                  ? "Saving…"
+                  : saveStatus === "saved"
+                    ? "Saved ✓"
+                    : saveStatus === "error"
+                      ? "Save failed"
+                      : "Save report"}
+              </button>
+            )}
+          </div>
           <h2 className="font-display text-3xl leading-tight text-ink">
-            True 10-year cost:{" "}
-            <span className="text-ink/80">{currency(report.trueCost)}</span>
+            True {horizon}-year cost:{" "}
+            <span className="text-ink/80">{currency(horizonCost)}</span>
           </h2>
 
           {/* AI narrative / skeleton / plain text */}
@@ -270,17 +299,17 @@ export function SummaryCard({ report, isGenerating = false }: SummaryCardProps) 
             label="Transit Dividend"
             value={currency(report.transitDividend)}
           />
-          {report.monteCarlo ? (
+          {horizonMc ? (
             <div className="rounded-3xl border border-[#D7E7E2] bg-[#F7FAF8] p-4 transition-shadow hover:shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
-                P50 Median
+                P50 Median ({horizon}y)
               </p>
               <p className="mt-2 font-display text-2xl text-ink">
-                {currency(report.monteCarlo.p50)}
+                {currency(horizonMc.p50)}
               </p>
               <p className="mt-1 text-[10px] text-slate/70">
-                P10 {currency(report.monteCarlo.p10)} ·{" "}
-                P90 {currency(report.monteCarlo.p90)}
+                P10 {currency(horizonMc.p10)} ·{" "}
+                P90 {currency(horizonMc.p90)}
               </p>
             </div>
           ) : (

@@ -2,13 +2,16 @@
 
 import dynamic from "next/dynamic";
 import { useState, useTransition } from "react";
+import { AgentsPanel } from "@/components/agents-panel";
 import { Charts } from "@/components/charts";
 import { FlagList } from "@/components/flag-list";
+import { FloatingChat } from "@/components/floating-chat";
 import { InputCard } from "@/components/input-card";
 import { SummaryCard } from "@/components/summary-card";
-import { buildPreviewReport, defaultFormState, type MeridianFormState } from "@/lib/report";
-import { fetchReport } from "@/lib/api";
+import { buildPreviewReport, defaultFormState, HORIZONS, type MeridianFormState } from "@/lib/report";
+import { fetchReport, saveReport } from "@/lib/api";
 import { fetchPipelineRefresh, type PipelineStatus } from "@/lib/pipeline-api";
+import { cn } from "@/lib/utils";
 
 // Leaflet uses `window` — must be client-only with no SSR
 const PropertyMap = dynamic(
@@ -22,9 +25,12 @@ export function Workbench() {
   const [isPending, startTransition] = useTransition();
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
   const [isRefreshing, startRefreshTransition] = useTransition();
+  const [horizon, setHorizon] = useState<number>(10);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   function handleSubmit(nextInputs: MeridianFormState) {
     setError(null);
+    setSaveStatus("idle");
     startTransition(async () => {
       try {
         setReport(await fetchReport(nextInputs));
@@ -34,6 +40,20 @@ export function Workbench() {
       }
     });
   }
+
+  async function handleSave() {
+    setSaveStatus("saving");
+    try {
+      await saveReport(report);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2500);
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  const horizonKey = `${horizon}y`;
+  const selectedMc = report.monteCarloHorizons[horizonKey] ?? report.monteCarlo;
 
   function handleRefreshPipeline() {
     startRefreshTransition(async () => {
@@ -62,21 +82,51 @@ export function Workbench() {
           />
         </div>
         {/* Summary card shows its own generating skeleton */}
-        <SummaryCard report={report} isGenerating={isPending} />
+        <SummaryCard
+          report={report}
+          isGenerating={isPending}
+          horizon={horizon}
+          onSave={handleSave}
+          saveStatus={saveStatus}
+        />
       </section>
+
+      {/* 5 / 10 / 15-year horizon toggle */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
+          Horizon
+        </span>
+        {HORIZONS.map((h) => (
+          <button
+            key={h}
+            onClick={() => setHorizon(h)}
+            className={cn(
+              "rounded-full px-4 py-1.5 text-sm font-semibold transition-colors",
+              horizon === h ? "bg-ink text-mist" : "border border-ink/15 text-slate hover:bg-mist/60",
+            )}
+          >
+            {h}-year
+          </button>
+        ))}
+      </div>
+
       {error && (
         <p className="rounded-xl border border-[#EDB6A4] bg-[#F9DDD4] px-4 py-3 text-sm text-[#9A381F]">
           {error}
         </p>
       )}
+      <AgentsPanel trace={report.pipelineTrace} />
       <FlagList flags={report.flags} />
       <Charts
         components={report.components}
         scenarios={report.scenarios}
-        monteCarlo={report.monteCarlo}
+        monteCarlo={selectedMc}
         listPrice={report.inputs.listPrice}
       />
       <PropertyMap geometry={report.mapGeometry} />
+
+      {/* Always-on floating chat, grounded in the current report */}
+      <FloatingChat report={report} />
     </>
   );
 }

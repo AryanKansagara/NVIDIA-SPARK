@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.core.config import get_settings
 from app.schemas.pipeline import PipelineRefreshRequest, PipelineRefreshResponse
-from app.services.pipeline import ckan_fetcher
+from app.services.pipeline import ckan_fetcher, shp_fetcher
 from app.services.pipeline import heritage_cleaner, development_cleaner
 from app.services.pipeline.duckdb_store import get_store
 
@@ -42,10 +42,11 @@ async def refresh_pipeline(
 
     store = await get_store(settings.duckdb_path)
 
-    # Fetch both datasets concurrently
+    # Fetch both datasets concurrently. Heritage is SHP-only (no datastore API),
+    # so it uses the shapefile fetcher; development uses the datastore API.
     try:
         heritage_records, development_records = await asyncio.gather(
-            ckan_fetcher.fetch_all(_HERITAGE_PACKAGE),
+            shp_fetcher.fetch_shp_points(_HERITAGE_PACKAGE),
             ckan_fetcher.fetch_all(_DEVELOPMENT_PACKAGE),
             return_exceptions=True,
         )

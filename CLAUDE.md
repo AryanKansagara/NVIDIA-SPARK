@@ -28,7 +28,14 @@ npm run lint           # eslint
 node_modules/.bin/tsc --noEmit   # typecheck (plain `npx tsc` installs the wrong package)
 ```
 
-**Local LLM (optional NIM container)** — model `nvidia/nemotron-nano-12b-v2-vl`, served OpenAI-compatible on port 8080. Requires an NGC key with NIM entitlement (`docker login nvcr.io`). If unavailable, synthesis falls back to the hosted NVIDIA API via `NIM_API_KEY`, or set `NIM_ENABLED=false` to skip narration entirely (the rest of the report still works).
+**Local model servers (on-device, OpenAI-compatible)** — served by vLLM, no hosted API, no API key:
+```bash
+cd backend
+bash scripts/serve_llm.sh            # LLM  on :8080  (model nemotron-3-nano-30b-a3b, NVFP4 ~19GB)
+bash scripts/serve_embed.sh          # NeMo Retriever embeddings on :8081
+bash scripts/restart_llm.sh -d       # kill + relaunch LLM detached (logs -> /tmp/llm.log)
+```
+`serve_llm.sh` loads a local model directory (`LLM_MODEL_PATH`, default the on-disk NVFP4 30B) and falls back to an HF download if absent. Synthesis and chat are **local-only** — if `:8080` is down, narration returns `None` and the rest of the report still renders. Set `NIM_ENABLED=false` to skip narration entirely.
 
 ## Architecture
 
@@ -38,13 +45,15 @@ node_modules/.bin/tsc --noEmit   # typecheck (plain `npx tsc` installs the wrong
 1. **Geocode** (`services/geocoding`) — Nominatim → lat/lon used by everything downstream.
 2. **Data retrieval** (`services/data_sources/{heritage,flood,development}.py`) — async lookups against CKAN (heritage ~12k records, development ~26k records) and TRCA ArcGIS (flood polygon). **Each service silently falls back to a heuristic** if the live API is unreachable; fallbacks surface as `warnings` in the response (string match on `"heuristic"` in the source field).
 3. **Deterministic engine** (`services/engine/report_engine.py`) — owns ALL numbers: LTT, property tax projection, CMHC premium, two-term (60+60 month) mortgage model with bull/base/bear renewal scenarios, risk loadings, transit dividend. The LLM never invents figures.
-4. **Synthesis** (`services/synthesis/service.py`) — sends structured engine output as JSON to the LLM. **Local-first → hosted-API fallback**: tries `nim_local_url` (:8080), then `nim_base_url` (`integrate.api.nvidia.com`) with `nim_api_key`. Returns `None` on any failure so the report degrades gracefully.
+4. **Synthesis** (`services/synthesis/service.py`) — sends structured engine output as JSON to the **local** Nemotron LLM (`nim_local_url`, :8080, model `nim_model`). **Local-only — no hosted-API fallback** (the previous cloud path has been removed). Returns `None` on any failure so the report degrades gracefully. The prompt is personalized with the stored buyer profile and includes 5/10/15-year horizon simulations.
 
-Also in `build_report`: a **GPU Monte Carlo** simulation (`services/gpu/monte_carlo.py`, CuPy with NumPy fallback, 10k trajectories) producing the P10/P50/P90 band, **RAG land-law context** (`services/rag/service.py`, NemoRetriever-first with ChromaDB fallback) fed into the synthesis prompt, and **map geometry** including the community-pricing heuristic (`_community_insights`).
+Also in `build_report`: a **GPU Monte Carlo** simulation (`services/gpu/monte_carlo.py`, CuPy with NumPy fallback, 10k trajectories) producing the P10/P50/P90 band across **5/10/15-year horizons**, **RAG land-law context** (`services/rag/service.py`, NemoRetriever-first with ChromaDB fallback) fed into the synthesis prompt, the buyer **profile** pulled from `services/storage/app_store.py`, and **map geometry** including the community-pricing heuristic (`_community_insights`).
+
+**Phase 6 — on-device memory, chat & profile** (`services/memory/`, `services/storage/`): a three-tier memory layer — short-term DuckDB `chat_turns`, structured DuckDB `user_profile`, and episodic ChromaDB `user_memories` embedded via the local NeMo Retriever server (:8081). Exposed via `POST /api/v1/chat` (conversational assistant, background fact extraction), `GET/PUT /api/v1/profile`, and `POST/GET /api/v1/reports[/{id}]` (saved reports). Memory feeds both chat and report synthesis. Everything runs on-device; see `docs/gpu-pipeline-upgrade/06-memory-chat.md` and `PRD.md`.
 
 **Critical duplication:** the entire financial engine is reimplemented identically in TypeScript at `frontend/lib/report.ts` (`buildPreviewReport`) as an offline fallback used when the backend is unreachable. **Any change to a formula or constant in `report_engine.py` must be mirrored in `report.ts`, and vice versa**, or the preview and live numbers diverge. All such constants are documented in `docs/frontend-parameters.md`.
 
-**Configuration:** all tunables live in `backend/app/core/config.py` (pydantic-settings), overridable via env vars or `backend/.env` (gitignored). This includes financial constants (tax rates, transit dividend amounts, risk loadings), NIM/Nemotron endpoints and model names, RAG settings, and GPU/Monte Carlo flags.
+**Configuration:** all tunables live in `backend/app/core/config.py` (pydantic-settings), overridable via env vars or `backend/.env` (gitignored). This includes financial constants (tax rates, transit dividend amounts, risk loadings), local LLM/embedding endpoints (`nim_local_url` :8080, `embedding_local_url` :8081) and model names (`nim_model`), RAG settings, and GPU/Monte Carlo flags.
 
 **Other endpoints:** `GET /api/v1/debug/{geocode,heritage,flood,development}?address=...` exercise individual data-source agents in isolation — useful for diagnosing which upstream dataset is failing. `POST /api/v1/pipeline/refresh` materializes CKAN data to Parquet/DuckDB (`services/pipeline/`).
 
@@ -56,4 +65,4 @@ Also in `build_report`: a **GPU Monte Carlo** simulation (`services/gpu/monte_ca
 
 ## Docs
 
-`docs/` holds the product/architecture narrative; `docs/gpu-pipeline-upgrade/` documents the DuckDB/GPU/LLM/map upgrade phases; `docs/frontend-parameters.md` is the authoritative list of every parameter behind the displayed numbers.
+`PRD.md` (repo root) is the whole-product requirements doc; `docs/prd-memory-chat.md` is the Phase 6 memory/chat sub-PRD. `docs/` holds the product/architecture narrative; `docs/gpu-pipeline-upgrade/` documents the DuckDB/GPU/LLM/map/memory upgrade phases (1–6); `docs/frontend-parameters.md` is the authoritative list of every parameter behind the displayed numbers.

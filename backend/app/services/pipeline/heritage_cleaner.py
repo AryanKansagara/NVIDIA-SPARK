@@ -72,11 +72,7 @@ def run(store: DuckDBStore) -> int:
     ]
 
     store.execute("DELETE FROM heritage")
-    store.execute(
-        "INSERT INTO heritage (record_id, address, status, latitude, longitude) VALUES (?,?,?,?,?)",
-        # duckdb executemany via executemany
-    )
-    # Use executemany for bulk insert
+    # Bulk insert the cleaned, standardized rows.
     store._con.executemany(
         "INSERT OR REPLACE INTO heritage (record_id, address, status, latitude, longitude) VALUES (?,?,?,?,?)",
         cleaned,

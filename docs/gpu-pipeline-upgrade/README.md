@@ -9,6 +9,7 @@ This folder documents the full upgrade applied to Meridian after the initial MVP
 | 3 | Interactive Leaflet Map | [03-leaflet-map.md](03-leaflet-map.md) |
 | 4 | LLM Upgrade (Nemotron + NemoRetriever) | [04-llm-upgrade.md](04-llm-upgrade.md) |
 | — | Frontend Changes | [05-frontend-changes.md](05-frontend-changes.md) |
+| 6 | On-Device Memory, Chat & Saved Reports | [06-memory-chat.md](06-memory-chat.md) |
 
 ## Why This Upgrade Existed
 

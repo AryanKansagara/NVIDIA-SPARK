@@ -75,6 +75,13 @@ class CommunityInsight(BaseModel):
     notes: list[str]
 
 
+class PipelineStep(BaseModel):
+    name: str
+    started_ms: float  # offset from pipeline start
+    elapsed_ms: float
+    parallel_group: int  # steps sharing a group ran concurrently
+
+
 class MapGeometry(BaseModel):
     property_lat: float
     property_lon: float
@@ -94,4 +101,7 @@ class ReportResponse(BaseModel):
     key_numbers: KeyNumbers
     summary_text: str | None = None
     monte_carlo: MonteCarloResult | None = None
+    monte_carlo_horizons: dict[str, MonteCarloResult] = Field(default_factory=dict)
+    horizon_costs: dict[str, int] = Field(default_factory=dict)
     map_geometry: MapGeometry | None = None
+    pipeline_trace: list[PipelineStep] = Field(default_factory=list)
