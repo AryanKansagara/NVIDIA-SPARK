@@ -55,5 +55,41 @@ class GeocodingService:
             raw_display_name=top.get("display_name"),
         )
 
+    async def suggest(self, query_str: str) -> list[dict]:
+        if not query_str or len(query_str.strip()) < 3:
+            return []
+
+        query = f"{query_str}, {self.settings.geocoder_city_bias}"
+        params = {
+            "q": query,
+            "format": "jsonv2",
+            "limit": 5,
+            "countrycodes": self.settings.geocoder_country_codes,
+        }
+        headers = {"User-Agent": self.settings.geocoder_user_agent}
+
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
+                response = await client.get(
+                    self.settings.geocoder_base_url,
+                    params=params,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+
+            results = []
+            for item in payload:
+                display_name = item.get("display_name", "")
+                results.append({
+                    "address": display_name,
+                    "display_name": display_name,
+                    "latitude": float(item["lat"]) if "lat" in item else None,
+                    "longitude": float(item["lon"]) if "lon" in item else None,
+                })
+            return results
+        except Exception:
+            return []
+
     def _normalize(self, address: str) -> str:
         return " ".join(address.upper().split())

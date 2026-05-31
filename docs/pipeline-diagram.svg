@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1180" viewBox="0 0 1400 1180" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+    <marker id="arrowFb" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#d97706"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#94a3b8" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="1400" height="1180" fill="#f8fafc"/>
+
+  <!-- title -->
+  <text x="700" y="48" text-anchor="middle" font-size="28" font-weight="700" fill="#0f172a">Meridian — Report Generation Pipeline</text>
+  <text x="700" y="74" text-anchor="middle" font-size="14" fill="#64748b">POST /api/v1/report  ·  orchestrated by report_service.build_report()</text>
+
+  <!-- legend -->
+  <g font-size="12" fill="#334155">
+    <rect x="1075" y="92" width="300" height="74" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="1090" y="110" font-weight="700" fill="#0f172a">Legend</text>
+    <line x1="1090" y1="126" x2="1120" y2="126" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="1128" y="130">primary data / request flow</text>
+    <line x1="1090" y1="150" x2="1120" y2="150" stroke="#d97706" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowFb)"/>
+    <text x="1128" y="154">heuristic / hosted fallback path</text>
+  </g>
+
+  <!-- ============ STAGE 1 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="100" width="320" height="118" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  </g>
+  <text x="76" y="124" font-size="13" font-weight="700" fill="#1d4ed8">STAGE 1 · Input</text>
+  <text x="76" y="146" font-size="12" fill="#0f172a">schemas/report.py · ReportRequest</text>
+  <text x="76" y="166" font-size="11.5" fill="#334155">{ address, list_price, buyer_profile,</text>
+  <text x="76" y="182" font-size="11.5" fill="#334155">  down_payment_percent, mortgage_rate,</text>
+  <text x="76" y="198" font-size="11.5" fill="#334155">  amortization_years }  (defaults applied)</text>
+
+  <!-- ============ STAGE 2 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="470" y="100" width="320" height="118" rx="12" fill="#ecfeff" stroke="#06b6d4" stroke-width="1.5"/>
+  </g>
+  <text x="486" y="124" font-size="13" font-weight="700" fill="#0e7490">STAGE 2 · Geocode</text>
+  <text x="486" y="146" font-size="12" fill="#0f172a">geocoding/service.py</text>
+  <text x="486" y="170" font-size="11.5" fill="#334155">address → lat / lon</text>
+  <text x="486" y="190" font-size="11.5" fill="#334155">via Nominatim</text>
+
+  <!-- arrow 1->2 -->
+  <line x1="380" y1="159" x2="468" y2="159" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="424" y="151" text-anchor="middle" font-size="11" fill="#475569">address</text>
+
+  <!-- ============ STAGE 3 (parallel) ============ -->
+  <rect x="60" y="270" width="1040" height="190" rx="14" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="2 0"/>
+  <text x="80" y="296" font-size="13" font-weight="700" fill="#15803d">STAGE 3 · Parallel async data retrieval (lat/lon → evidence)</text>
+  <text x="80" y="314" font-size="11.5" fill="#475569">typed models in services/data_sources/models.py · each source has a heuristic fallback that emits a warning</text>
+
+  <!-- Heritage -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="330" width="320" height="110" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.3"/>
+  </g>
+  <text x="96" y="352" font-size="12.5" font-weight="700" fill="#166534">Heritage lookup</text>
+  <text x="96" y="372" font-size="11.5" fill="#334155">CKAN ~12k · ~80m spatial match</text>
+  <text x="96" y="392" font-size="11.5" fill="#334155">→ HeritageEvidence</text>
+  <text x="96" y="416" font-size="10.5" fill="#d97706">fallback → heuristic + warning</text>
+
+  <!-- Flood -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="330" width="320" height="110" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.3"/>
+  </g>
+  <text x="436" y="352" font-size="12.5" font-weight="700" fill="#166534">Flood lookup</text>
+  <text x="436" y="372" font-size="11.5" fill="#334155">TRCA ArcGIS · point-in-polygon</text>
+  <text x="436" y="392" font-size="11.5" fill="#334155">→ FloodEvidence</text>
+  <text x="436" y="416" font-size="10.5" fill="#d97706">fallback → heuristic + warning</text>
+
+  <!-- Development -->
+  <g filter="url(#shadow)">
+    <rect x="760" y="330" width="320" height="110" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.3"/>
+  </g>
+  <text x="776" y="352" font-size="12.5" font-weight="700" fill="#166534">Development lookup</text>
+  <text x="776" y="372" font-size="11.5" fill="#334155">CKAN ~26k · 500m haversine count</text>
+  <text x="776" y="392" font-size="11.5" fill="#334155">→ DevelopmentEvidence</text>
+  <text x="776" y="416" font-size="10.5" fill="#d97706">fallback → heuristic + warning</text>
+
+  <!-- arrow 2->3 -->
+  <line x1="630" y1="218" x2="630" y2="268" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="690" y="246" text-anchor="middle" font-size="11" fill="#475569">lat / lon</text>
+
+  <!-- ============ STAGE 4 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="510" width="500" height="130" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  </g>
+  <text x="76" y="534" font-size="13" font-weight="700" fill="#b45309">STAGE 4 · Deterministic cost engine</text>
+  <text x="76" y="556" font-size="12" fill="#0f172a">engine/report_engine.py</text>
+  <text x="76" y="578" font-size="11.5" fill="#334155">evidence + inputs → all dollar figures: LTT, property tax 10y,</text>
+  <text x="76" y="596" font-size="11.5" fill="#334155">CMHC premium, 60+60mo two-term mortgage (bull/base/bear),</text>
+  <text x="76" y="614" font-size="11.5" fill="#334155">risk loadings, transit dividend, true_10_year_cost, flags</text>
+
+  <!-- arrow 3->4 -->
+  <line x1="240" y1="460" x2="240" y2="508" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="300" y="488" text-anchor="middle" font-size="11" fill="#475569">evidence objects</text>
+
+  <!-- ============ STAGE 5 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="510" width="480" height="130" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5"/>
+  </g>
+  <text x="636" y="534" font-size="13" font-weight="700" fill="#7e22ce">STAGE 5 · GPU Monte Carlo</text>
+  <text x="636" y="556" font-size="12" fill="#0f172a">gpu/monte_carlo.py</text>
+  <text x="636" y="578" font-size="11.5" fill="#334155">10,000 trajectories · CuPy (GB10)</text>
+  <text x="636" y="598" font-size="11.5" fill="#334155">→ P10 / P50 / P90 / mean band</text>
+  <text x="636" y="622" font-size="10.5" fill="#d97706">fallback → NumPy CPU</text>
+
+  <!-- arrow 4->5 -->
+  <line x1="560" y1="575" x2="618" y2="575" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="589" y="567" text-anchor="middle" font-size="11" fill="#475569">figures</text>
+
+  <!-- ============ STAGE 6 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="700" width="500" height="130" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  </g>
+  <text x="76" y="724" font-size="13" font-weight="700" fill="#b91c1c">STAGE 6 · RAG land-law context</text>
+  <text x="76" y="746" font-size="12" fill="#0f172a">rag/service.py</text>
+  <text x="76" y="768" font-size="11.5" fill="#334155">top flags → query → NemoRetriever (primary)</text>
+  <text x="76" y="788" font-size="11.5" fill="#334155">→ relevant land-law passages</text>
+  <text x="76" y="812" font-size="10.5" fill="#d97706">fallback → ChromaDB</text>
+
+  <!-- arrow 4->6 -->
+  <line x1="150" y1="640" x2="150" y2="698" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="216" y="672" text-anchor="middle" font-size="11" fill="#475569">top flags</text>
+
+  <!-- ============ STAGE 7 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="700" width="480" height="130" rx="12" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+  </g>
+  <text x="636" y="724" font-size="13" font-weight="700" fill="#0369a1">STAGE 7 · Map + community geometry</text>
+  <text x="636" y="746" font-size="12" fill="#0f172a">report_service._community_insights</text>
+  <text x="636" y="768" font-size="11.5" fill="#334155">property pin · 500m dev radius · 400m TTC ring</text>
+  <text x="636" y="788" font-size="11.5" fill="#334155">flood polygon · community pricing popup</text>
+
+  <!-- arrow 3->7 -->
+  <line x1="900" y1="460" x2="900" y2="698" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="966" y="588" text-anchor="middle" font-size="11" fill="#475569">geometry inputs</text>
+
+  <!-- ============ STAGE 8 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="890" width="640" height="150" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  </g>
+  <text x="76" y="914" font-size="13" font-weight="700" fill="#4338ca">STAGE 8 · LLM synthesis</text>
+  <text x="76" y="936" font-size="12" fill="#0f172a">synthesis/service.py</text>
+  <text x="76" y="958" font-size="11.5" fill="#334155">engine output + Monte Carlo + RAG context → 3-paragraph narrative</text>
+  <text x="76" y="982" font-size="11.5" fill="#334155">LOCAL-FIRST: local NIM (localhost:8080, nemotron-nano-12b-v2-vl)</text>
+  <text x="76" y="1002" font-size="10.5" fill="#d97706">fallback → hosted NVIDIA API (integrate.api.nvidia.com, NIM_API_KEY) → None</text>
+
+  <!-- arrows into 8 -->
+  <line x1="300" y1="830" x2="300" y2="888" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="330" y="862" font-size="11" fill="#475569">passages</text>
+  <line x1="700" y1="640" x2="640" y2="888" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="690" y="760" font-size="11" fill="#475569">MC band</text>
+
+  <!-- ============ STAGE 9 ============ -->
+  <g filter="url(#shadow)">
+    <rect x="740" y="890" width="360" height="150" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+  </g>
+  <text x="756" y="914" font-size="13" font-weight="700" fill="#0f766e">STAGE 9 · Assemble ReportResponse</text>
+  <text x="756" y="936" font-size="11.5" fill="#334155">true_10_year_cost · cost_breakdown</text>
+  <text x="756" y="954" font-size="11.5" fill="#334155">mortgage_scenarios · flags · warnings</text>
+  <text x="756" y="972" font-size="11.5" fill="#334155">key_numbers · monte_carlo · map_geometry</text>
+  <text x="756" y="990" font-size="11.5" fill="#334155">summary_text</text>
+  <text x="756" y="1014" font-size="11.5" font-weight="700" fill="#0f766e">→ JSON to frontend</text>
+
+  <!-- arrow 8->9 -->
+  <line x1="700" y1="965" x2="738" y2="965" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ============ OFFLINE SUB-PIPELINE ============ -->
+  <rect x="1140" y="510" width="240" height="330" rx="14" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="1260" y="536" text-anchor="middle" font-size="12.5" font-weight="700" fill="#334155">Offline data</text>
+  <text x="1260" y="554" text-anchor="middle" font-size="12.5" font-weight="700" fill="#334155">materialization</text>
+  <text x="1260" y="574" text-anchor="middle" font-size="10.5" fill="#64748b">POST /api/v1/pipeline/refresh</text>
+  <text x="1260" y="590" text-anchor="middle" font-size="10.5" fill="#64748b">services/pipeline/</text>
+
+  <g font-size="11.5" fill="#0f172a">
+    <rect x="1170" y="606" width="180" height="34" rx="8" fill="#ffffff" stroke="#94a3b8"/>
+    <text x="1260" y="628" text-anchor="middle">CKAN</text>
+    <rect x="1170" y="672" width="180" height="34" rx="8" fill="#ffffff" stroke="#94a3b8"/>
+    <text x="1260" y="694" text-anchor="middle">Parquet</text>
+    <rect x="1170" y="738" width="180" height="34" rx="8" fill="#ffffff" stroke="#94a3b8"/>
+    <text x="1260" y="760" text-anchor="middle">DuckDB</text>
+    <text x="1260" y="800" text-anchor="middle" font-size="10.5" fill="#64748b">data/meridian.duckdb</text>
+  </g>
+  <line x1="1260" y1="640" x2="1260" y2="670" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1260" y1="706" x2="1260" y2="736" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- dashed link: offline store feeds Stage 3 sources -->
+  <path d="M1140 600 C 1110 560, 1100 420, 1080 400" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+  <text x="1130" y="470" text-anchor="middle" font-size="10" fill="#64748b">materialized</text>
+  <text x="1130" y="484" text-anchor="middle" font-size="10" fill="#64748b">data store</text>
+</svg>

@@ -13,6 +13,7 @@ class FloodEvidence:
     in_flood_zone: bool
     annual_risk_loading: int
     source: str
+    polygon_geojson: dict | None = None
 
 
 @dataclass

@@ -1,102 +1,83 @@
 "use client";
 
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { Panel } from "@/components/ui/panel";
-import type { BreakdownPoint, ScenarioPoint } from "@/lib/report";
+import { MonteCarloChart } from "@/components/monte-carlo-chart";
+import type { BreakdownPoint, MonteCarloDistribution, ScenarioPoint } from "@/lib/report";
 
-function currency(value: number) {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
+const CAD = new Intl.NumberFormat("en-CA", {
+  style: "currency",
+  currency: "CAD",
+  maximumFractionDigits: 0,
+});
 
 type ChartsProps = {
   components: BreakdownPoint[];
   scenarios: ScenarioPoint[];
+  monteCarlo?: MonteCarloDistribution | null;
+  listPrice?: number;
+  horizon?: number;
 };
 
-export function Charts({ components, scenarios }: ChartsProps) {
+// Map engine fills to palette colours + labels for the composition bars.
+const COMPONENT_META: Record<string, { color: string; label: string }> = {
+  "#10212B": { color: "var(--text-primary)", label: "Mortgage" },
+  "#B99239": { color: "var(--amber)", label: "Property Tax" },
+  "#E16B47": { color: "var(--red)", label: "LTT (net)" },
+  "#8C5B4A": { color: "var(--text-muted)", label: "Risk Loadings" },
+  "#2B6A57": { color: "var(--green)", label: "Transit" },
+};
+
+function CostCompositionBars({ components }: { components: BreakdownPoint[] }) {
+  const items = (components ?? []).map((c) => ({
+    label: COMPONENT_META[c.fill]?.label ?? c.label,
+    color: COMPONENT_META[c.fill]?.color ?? "var(--accent)",
+    value: c.value,
+  }));
+  const maxAbs = Math.max(...items.map((i) => Math.abs(i.value)), 1);
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+    <div className="flex flex-col gap-3">
+      {items.map((item) => (
+        <div key={item.label} className="flex items-center gap-3">
+          <span className="w-28 shrink-0 text-xs text-[color:var(--text-muted)]">{item.label}</span>
+          <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-[color:var(--surface-raised)]">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${(Math.abs(item.value) / maxAbs) * 100}%`,
+                backgroundColor: item.color,
+              }}
+            />
+          </div>
+          <span
+            className="w-24 shrink-0 text-right font-mono text-xs font-semibold"
+            style={{ color: item.color }}
+          >
+            {item.value < 0 ? `-${CAD.format(Math.abs(item.value))}` : CAD.format(item.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function Charts({ components, scenarios, monteCarlo = null, listPrice = 0, horizon = 10 }: ChartsProps) {
+  return (
+    <div className="flex flex-col gap-3">
       <Panel>
-        <div className="space-y-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate">
-              Cost Composition
-            </p>
-            <h3 className="mt-2 font-display text-3xl text-ink">
-              What actually drives the number
-            </h3>
-          </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={components} margin={{ left: -16, right: 12 }}>
-                <CartesianGrid strokeDasharray="4 4" stroke="#d7e7e2" />
-                <XAxis dataKey="label" tick={{ fill: "#5D7382", fontSize: 12 }} />
-                <YAxis
-                  tick={{ fill: "#5D7382", fontSize: 12 }}
-                  tickFormatter={(value) => `$${Math.round(value / 1000)}k`}
-                />
-                <Tooltip formatter={(value: number) => currency(value)} />
-                <Bar dataKey="value" radius={[18, 18, 0, 0]}>
-                  {components.map((entry) => (
-                    <Cell key={entry.label} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">
+          Mortgage Scenario Ladder ({horizon}YR)
+        </p>
+        <div className="mt-4">
+          <MonteCarloChart distribution={monteCarlo} scenarios={scenarios} listPrice={listPrice} />
         </div>
       </Panel>
       <Panel>
-        <div className="space-y-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate">
-              Renewal Risk
-            </p>
-            <h3 className="mt-2 font-display text-3xl text-ink">
-              Mortgage scenario ladder
-            </h3>
-          </div>
-          <div className="space-y-3">
-            {scenarios.map((item, index) => (
-              <div
-                key={item.scenario}
-                className="animate-rise rounded-3xl border border-[#D7E7E2] bg-[#F7FAF8] p-4"
-                style={{ animationDelay: `${index * 90}ms` }}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
-                      {item.scenario}
-                    </p>
-                    <p className="mt-2 font-display text-3xl text-ink">
-                      {currency(item.cost)}
-                    </p>
-                  </div>
-                  <div className="w-28 rounded-full bg-[#DDEEE3] p-1">
-                    <div
-                      className="h-2 rounded-full bg-moss"
-                      style={{
-                        width: `${72 + index * 12}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">
+          Cost Composition
+        </p>
+        <div className="mt-4">
+          <CostCompositionBars components={components} />
         </div>
       </Panel>
     </div>

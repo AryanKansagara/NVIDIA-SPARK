@@ -35,7 +35,7 @@ def _chunk_id(source: str, index: int) -> str:
 async def _embed_batch(texts: list[str], settings: Settings) -> list[list[float]]:
     async with httpx.AsyncClient(timeout=settings.nim_timeout_seconds) as client:
         resp = await client.post(
-            f"{settings.nim_base_url}/embeddings",
+            f"{settings.embedding_local_url}/embeddings",
             json={"model": settings.rag_embedding_model, "input": texts},
         )
         resp.raise_for_status()
