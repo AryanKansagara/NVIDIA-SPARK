@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     geocoder_city_bias: str = "Toronto, Ontario, Canada"
     request_timeout_seconds: float = Field(default=5.0, gt=0)  # 5s per source per PRD — timeout → UNKNOWN confidence
     property_tax_rate: float = 0.00767311
-    property_tax_growth_rate: float = 0.035
+    property_tax_growth_rate: float = 0.045
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
     flood_risk_internal_loading: int = 2500   # internal cost estimate only — never surface in output

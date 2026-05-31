@@ -106,6 +106,7 @@ export async function fetchReport(inputs: MeridianFormState): Promise<MeridianRe
       address: inputs.address,
       list_price: inputs.listPrice,
       buyer_profile: inputs.buyerProfile,
+      property_type: inputs.propertyType,
       down_payment_percent: inputs.downPaymentPercent,
       mortgage_rate: inputs.mortgageRate,
       amortization_years: inputs.amortizationYears,

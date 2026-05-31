@@ -46,7 +46,7 @@ export type MeridianReport = {
 
 const PROPERTY_TAX_RATE = 0.00767311;
 const RATE_MULTI_RES = 0.01208792;
-const PROPERTY_TAX_GROWTH = 0.035;
+const PROPERTY_TAX_GROWTH = 0.045;
 const AV_MULTIPLIERS: Record<string, number> = {
   condo:             0.90,
   condo_townhouse:   0.80,
