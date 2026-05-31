@@ -2,13 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { Panel } from "@/components/ui/panel";
-import { Pill } from "@/components/ui/pill";
-import { getProfile, saveProfile, type Profile } from "@/lib/api";
+import { getProfile, saveProfile, sendChat, type Profile } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
+
+const SESSION_KEY = "meridian_session";
+function sessionId(): string {
+  if (typeof window === "undefined") return "default";
+  let id = localStorage.getItem(SESSION_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(SESSION_KEY, id);
+  }
+  return id;
+}
 
 export default function ProfilePage() {
   const { refreshProfile } = useApp();
   const [profile, setProfile] = useState<Profile>({});
+  const [situation, setSituation] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
@@ -19,6 +30,11 @@ export default function ProfilePage() {
     setStatus("saving");
     try {
       await saveProfile(profile);
+      // Free-text situation is durable context → episodic memory via chat.
+      if (situation.trim()) {
+        sendChat(sessionId(), `For my profile, remember: ${situation.trim()}`, false).catch(() => {});
+        setSituation("");
+      }
       refreshProfile();
       setStatus("saved");
       setTimeout(() => setStatus("idle"), 2000);
@@ -36,9 +52,13 @@ export default function ProfilePage() {
       <Panel>
         <div className="space-y-6">
           <div className="space-y-2">
-            <Pill tone="yellow">Profile</Pill>
-            <h1 className="font-display text-3xl text-ink">Your profile</h1>
-            <p className="text-sm text-slate">
+            <span className="inline-flex items-center gap-1.5 rounded-pill border border-[color:var(--border-faint)] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
+              Profile
+            </span>
+            <h1 className="font-display text-3xl font-medium tracking-tight text-[color:var(--text-primary)]">
+              Your profile
+            </h1>
+            <p className="text-sm leading-relaxed text-[color:var(--text-secondary)]">
               Stored on-device only. Your economic situation personalizes every report and chat —
               nothing leaves the DGX Spark.
             </p>
@@ -56,18 +76,33 @@ export default function ProfilePage() {
                 setProfile((p) => ({ ...p, monthly_income: v === "" ? null : Number(v) }))
               }
             />
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">
+                Anything we should remember?
+              </span>
+              <textarea
+                rows={3}
+                value={situation}
+                onChange={(e) => setSituation(e.target.value)}
+                placeholder="Budget ceiling, cash on hand, risk tolerance, target neighbourhoods…"
+                className="resize-none rounded-md border border-[color:var(--border)] bg-[color:var(--surface-frosted)] px-4 py-3 text-sm text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)] placeholder:text-[color:var(--text-muted)]"
+              />
+              <span className="text-[11px] text-[color:var(--text-muted)]">
+                Saved as private memory the local model recalls in chat.
+              </span>
+            </label>
           </div>
 
           <div className="flex items-center gap-3">
             <button
               onClick={handleSave}
               disabled={status === "saving"}
-              className="rounded-2xl bg-ink px-6 py-3 text-sm font-semibold text-mist transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="rounded-pill bg-[color:var(--accent)] px-6 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {status === "saving" ? "Saving…" : "Save"}
             </button>
-            {status === "saved" && <span className="text-sm font-semibold text-moss">Saved ✓</span>}
-            {status === "error" && <span className="text-sm font-semibold text-ember">Save failed</span>}
+            {status === "saved" && <span className="text-sm font-medium text-[color:var(--green)]">Saved ✓</span>}
+            {status === "error" && <span className="text-sm font-medium text-[color:var(--red)]">Save failed</span>}
           </div>
         </div>
       </Panel>
@@ -88,12 +123,14 @@ function Input({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">{label}</span>
+      <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">
+        {label}
+      </span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-2xl border border-[#D7E7E2] bg-white/80 px-4 py-3 text-sm text-ink outline-none focus:border-moss"
+        className="rounded-md border border-[color:var(--border)] bg-[color:var(--surface-frosted)] px-4 py-3 text-sm text-[color:var(--text-primary)] outline-none focus:border-[color:var(--border-focus)]"
       />
     </label>
   );

@@ -25,4 +25,5 @@ async def health() -> dict:
         "llm_local": llm_local,
         "embeddings_local": embeddings_local,
         "model": settings.nim_model,
+        "vector_backend": settings.vector_backend,
     }

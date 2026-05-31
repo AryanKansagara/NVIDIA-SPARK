@@ -3,21 +3,25 @@
 import { useEffect, useRef } from "react";
 import type { MapGeometry } from "@/lib/report";
 
-type Props = { geometry: MapGeometry | null };
+type Props = { geometry: MapGeometry | null; address?: string };
 
-export function PropertyMap({ geometry }: Props) {
+export function PropertyMap({ geometry, address }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef = useRef<any>(null);
 
   useEffect(() => {
     if (!geometry || !mapRef.current) return;
-    if (mapInstanceRef.current) return; // already initialised
+    // Guard against React StrictMode double-invoke and hot-reload
+    if (mapInstanceRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((mapRef.current as any)._leaflet_id) return;
 
-    // Dynamically import leaflet (avoids SSR issues)
     import("leaflet").then((L) => {
-      // Fix default icon path (Next.js asset handling)
+      if (!mapRef.current) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((mapRef.current as any)._leaflet_id) return;
+
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -25,7 +29,7 @@ export function PropertyMap({ geometry }: Props) {
         shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
       });
 
-      const map = L.map(mapRef.current!).setView(
+      const map = L.map(mapRef.current, { zoomControl: true }).setView(
         [geometry.propertyLat, geometry.propertyLon],
         15,
       );
@@ -35,43 +39,74 @@ export function PropertyMap({ geometry }: Props) {
         attribution: "© OpenStreetMap contributors",
       }).addTo(map);
 
-      // Property pin
+      // Property pin — show the actual address
+      const propertyLabel = address ?? "Property";
       L.marker([geometry.propertyLat, geometry.propertyLon])
         .addTo(map)
-        .bindPopup("Property")
+        .bindPopup(
+          `<div style="font-weight:600;font-size:13px;max-width:240px;">${propertyLabel}</div>`,
+          { maxWidth: 280 },
+        )
         .openPopup();
 
-      // Development pressure radius (500 m)
-      L.circle([geometry.propertyLat, geometry.propertyLon], {
-        radius: geometry.devPressureRadiusM,
-        color: "#E16B47",
-        fillColor: "#E16B47",
-        fillOpacity: 0.08,
-        weight: 1.5,
-      })
-        .addTo(map)
-        .bindPopup(`Development pressure radius: ${geometry.devPressureRadiusM} m`);
-
-      // TTC proximity ring
-      L.circle([geometry.propertyLat, geometry.propertyLon], {
-        radius: 400,
-        color: "#2B6A57",
-        fillOpacity: 0,
-        weight: 1,
-        dashArray: "4 4",
-      })
-        .addTo(map)
-        .bindPopup("~400 m TTC walkability ring");
-
-      // Surrounding community pricing — clickable insight marker
+      // Community insights: price-range rings at different radii
       const ci = geometry.communityInsights;
       if (ci) {
         const fmt = (v: number) =>
-          new Intl.NumberFormat("en-CA", {
-            style: "currency",
-            currency: "CAD",
-            maximumFractionDigits: 0,
-          }).format(v);
+          new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(v);
+
+        // Inner ring (200m) — tightest comparable pocket
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: 200,
+          color: "#5266EB",
+          fillColor: "#5266EB",
+          fillOpacity: 0.06,
+          weight: 1.5,
+          dashArray: "3 3",
+        }).addTo(map).bindPopup(
+          `<div style="font-size:12px;min-width:200px;"><b>~200m vicinity</b><br/>
+           Estimated: ~${fmt(Math.round(ci.medianEstimate * 0.98))}/sqft range<br/>
+           ~$${ci.pricePerSqftEstimate.toLocaleString("en-CA")}/sq ft</div>`
+        );
+
+        // Development pressure radius (500m)
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: geometry.devPressureRadiusM,
+          color: "#E16B47",
+          fillColor: "#E16B47",
+          fillOpacity: 0.07,
+          weight: 1.5,
+        }).addTo(map).bindPopup(
+          `<div style="font-size:12px;min-width:200px;"><b>${geometry.devPressureRadiusM}m development pressure zone</b><br/>
+           Community median: ${fmt(ci.medianEstimate)}<br/>
+           Range: ${fmt(ci.typicalRangeLow)} – ${fmt(ci.typicalRangeHigh)}<br/>
+           Trend: ${ci.trend === "rising" ? "▲ Rising" : ci.trend === "cooling" ? "▼ Cooling" : "▬ Stable"}</div>`,
+          { maxWidth: 280 }
+        );
+
+        // 1km radius — broader neighbourhood pricing
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: 1000,
+          color: "#B99239",
+          fillColor: "#B99239",
+          fillOpacity: 0.04,
+          weight: 1,
+          dashArray: "6 4",
+        }).addTo(map).bindPopup(
+          `<div style="font-size:12px;min-width:200px;"><b>~1km neighbourhood band</b><br/>
+           Broader area pricing: ${fmt(ci.typicalRangeLow)} – ${fmt(ci.typicalRangeHigh)}</div>`
+        );
+
+        // TTC walkability ring (400m)
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: 400,
+          color: "#2B6A57",
+          fillOpacity: 0,
+          weight: 1.5,
+          dashArray: "4 4",
+        }).addTo(map).bindPopup("~400 m TTC walkability ring");
+
+        // $ community insights marker (offset NE)
         const trendBadge =
           ci.trend === "rising"
             ? '<span style="color:#E16B47;font-weight:600;">▲ Rising</span>'
@@ -94,7 +129,6 @@ export function PropertyMap({ geometry }: Props) {
             </ul>
           </div>`;
 
-        // Custom $ pin, offset slightly NE of the property so both are visible.
         const dollarIcon = L.divIcon({
           className: "",
           html:
@@ -108,19 +142,31 @@ export function PropertyMap({ geometry }: Props) {
         L.marker([geometry.propertyLat + 0.0012, geometry.propertyLon + 0.0016], {
           icon: dollarIcon,
           title: "Community pricing insights",
-        })
-          .addTo(map)
-          .bindPopup(popupHtml, { maxWidth: 300 });
+        }).addTo(map).bindPopup(popupHtml, { maxWidth: 300 });
+      } else {
+        // No community insights — just show dev pressure and TTC rings
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: geometry.devPressureRadiusM,
+          color: "#E16B47",
+          fillColor: "#E16B47",
+          fillOpacity: 0.08,
+          weight: 1.5,
+        }).addTo(map).bindPopup(`Development pressure radius: ${geometry.devPressureRadiusM} m`);
+
+        L.circle([geometry.propertyLat, geometry.propertyLon], {
+          radius: 400,
+          color: "#2B6A57",
+          fillOpacity: 0,
+          weight: 1,
+          dashArray: "4 4",
+        }).addTo(map).bindPopup("~400 m TTC walkability ring");
       }
 
       // Flood polygon overlay
       if (geometry.floodPolygonGeojson) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         L.geoJSON(geometry.floodPolygonGeojson as any, {
           style: { color: "#3B82F6", fillColor: "#3B82F6", fillOpacity: 0.2, weight: 1.5 },
-        })
-          .addTo(map)
-          .bindPopup("TRCA Floodline polygon");
+        }).addTo(map).bindPopup("TRCA Floodline polygon");
       }
     });
 
@@ -130,69 +176,25 @@ export function PropertyMap({ geometry }: Props) {
         mapInstanceRef.current = null;
       }
     };
-  }, [geometry]);
+  }, [geometry, address]);
 
-  if (!geometry) return <_MapPlaceholder />;
+  if (!geometry) return null;
 
   return (
-    <section className="rounded-4xl overflow-hidden border border-[#D4E4DE] shadow-panel">
-      <div className="px-8 pt-6 pb-2 bg-white/70 backdrop-blur-sm">
-        <h2 className="text-lg font-semibold text-ink">Property Map</h2>
-        <p className="text-sm text-slate mt-0.5">
-          Property pin · Development pressure ({geometry.devPressureRadiusM} m) ·
-          TTC walkability ring{geometry.floodPolygonGeojson ? " · Flood polygon" : ""}
-          {geometry.communityInsights ? " · 💲 Click the orange pin for community pricing" : ""}
+    <section
+      className="overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]"
+      style={{ position: "relative", zIndex: 0 }}
+    >
+      <div className="px-6 pb-3 pt-5">
+        <h2 className="text-[15px] font-medium text-[color:var(--text-primary)]">Property Map</h2>
+        <p className="mt-0.5 text-xs text-[color:var(--text-muted)]">
+          Property pin · Price rings (200m / 500m / 1km) · TTC walkability ring
+          {geometry.floodPolygonGeojson ? " · Flood polygon" : ""}
+          {geometry.communityInsights ? " · click $ for community pricing" : ""}
         </p>
       </div>
-      {/* Leaflet CSS */}
-      <style>{`
-        @import url("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
-      `}</style>
+      <style>{`@import url("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");`}</style>
       <div ref={mapRef} style={{ height: 400, width: "100%" }} />
-    </section>
-  );
-}
-
-function _MapPlaceholder() {
-  return (
-    <section className="rounded-4xl overflow-hidden border border-[#D4E4DE] shadow-panel bg-white/70 backdrop-blur-sm">
-      <div className="flex flex-col lg:flex-row">
-        <div className="flex-1 p-8 lg:p-10 flex flex-col gap-6">
-          <div>
-            <h2 className="text-xl font-semibold text-ink leading-tight">
-              Map view should make the risk feel immediate.
-            </h2>
-            <p className="text-slate text-sm mt-2 leading-relaxed">
-              After generating a report, an interactive map will show the property pin,
-              flood polygon overlay, development pressure radius, and TTC proximity rings.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-start gap-3 p-3 rounded-2xl bg-mist/40 border border-[#C8E0D8]">
-              <span className="text-moss mt-0.5">📍</span>
-              <div>
-                <p className="text-xs font-semibold text-ink">Property pin</p>
-                <p className="text-xs text-slate">Geocoded lat/lon with normalized address</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-2xl bg-mist/40 border border-[#C8E0D8]">
-              <span className="text-blue-500 mt-0.5">🌊</span>
-              <div>
-                <p className="text-xs font-semibold text-ink">Flood overlay</p>
-                <p className="text-xs text-slate">TRCA polygon intersection and risk loading</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="flex-1 min-h-[260px] lg:min-h-0 relative bg-gradient-to-br from-mist via-[#D4EDE7] to-[#B8D9D0] flex items-center justify-center">
-          <div className="relative">
-            <div className="w-4 h-4 rounded-full bg-ink ring-4 ring-white shadow-lg" />
-          </div>
-          <p className="absolute bottom-4 text-xs text-slate/70 px-4 text-center">
-            Generate a report to see the live map
-          </p>
-        </div>
-      </div>
     </section>
   );
 }

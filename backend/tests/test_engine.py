@@ -81,3 +81,67 @@ def test_cost_breakdown_contains_expected_components():
         "risk_adjustments",
         "transit_dividend",
     ]
+
+
+def test_cost_rows_present_for_all_horizons():
+    engine = make_engine()
+    result = engine.build(base_input())
+    assert set(result.cost_rows_by_horizon) == {"5y", "10y", "15y", "20y"}
+    for rows in result.cost_rows_by_horizon.values():
+        keys = [r.key for r in rows]
+        assert keys == [
+            "mortgage_base",
+            "property_tax",
+            "ontario_ltt",
+            "toronto_mltt",
+            "cmhc_premium",
+            "transit_dividend",
+        ]
+
+
+def test_recurring_cost_rows_scale_with_horizon():
+    engine = make_engine()
+    result = engine.build(base_input())
+    mortgage_5 = next(r for r in result.cost_rows_by_horizon["5y"] if r.key == "mortgage_base")
+    mortgage_20 = next(r for r in result.cost_rows_by_horizon["20y"] if r.key == "mortgage_base")
+    assert mortgage_20.total > mortgage_5.total
+    # annual × years ≈ total for recurring rows
+    assert mortgage_5.annual is not None
+    assert abs(mortgage_5.annual * 5 - mortgage_5.total) <= 5
+
+
+def test_one_time_rows_flagged_and_constant_across_horizons():
+    engine = make_engine()
+    result = engine.build(base_input())
+    for key in ("ontario_ltt", "toronto_mltt", "cmhc_premium"):
+        r5 = next(r for r in result.cost_rows_by_horizon["5y"] if r.key == key)
+        r20 = next(r for r in result.cost_rows_by_horizon["20y"] if r.key == key)
+        assert r5.one_time is True
+        assert r5.annual is None
+        assert r5.total == r20.total
+
+
+def test_transit_row_is_a_credit():
+    engine = make_engine()
+    row = next(r for r in engine.build(base_input()).cost_rows_by_horizon["10y"] if r.key == "transit_dividend")
+    assert row.is_credit is True
+    assert row.total < 0
+
+
+def test_composite_signals_always_low_confidence():
+    engine = make_engine()
+    signals = engine.build(base_input()).composite_signals
+    names = {s.signal_name for s in signals}
+    assert names == {"Maintenance Complexity Signal", "Future Tax Pressure Signal"}
+    assert all(s.confidence == "Low" for s in signals)
+    assert all(s.disclaimer for s in signals)
+
+
+def test_heritage_flag_carries_leverage_range():
+    engine = make_engine()
+    result = engine.build(base_input(heritage=HeritageEvidence(status="part_iv", reason="t", source="t")))
+    heritage_flag = next(f for f in result.flags if f.title == "Heritage designation")
+    assert heritage_flag.leverage_low == 40000
+    assert heritage_flag.leverage_high == 60000
+    assert heritage_flag.say_at_table
+    assert heritage_flag.source == "Toronto Heritage Register (CKAN)"

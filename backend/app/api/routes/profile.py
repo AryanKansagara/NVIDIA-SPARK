@@ -44,3 +44,10 @@ async def get_report(report_id: str) -> dict[str, Any]:
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
+
+
+@router.delete("/reports/{report_id}", status_code=204)
+async def delete_report(report_id: str) -> None:
+    deleted = _store().delete_report(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Report not found")

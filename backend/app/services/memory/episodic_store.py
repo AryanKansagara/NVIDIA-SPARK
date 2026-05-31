@@ -23,7 +23,11 @@ class EpisodicStore:
         self.settings = settings
         store_path = Path(settings.rag_vector_store_path)
         store_path.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(path=str(store_path))
+        # anonymized_telemetry=False keeps episodic memory fully on-device.
+        self._client = chromadb.PersistentClient(
+            path=str(store_path),
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
         self._collection = self._client.get_or_create_collection(
             name=_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},

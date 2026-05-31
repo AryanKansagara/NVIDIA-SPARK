@@ -29,6 +29,79 @@ Open **http://localhost:3000**, enter an address + list price + buyer profile, a
 
 ---
 
+## Linux System Installation & Setup
+
+If you are setting up and running Meridian on a fresh **Linux machine (e.g., Ubuntu 22.04 / 24.04)**, follow these instructions to install all prerequisites and launch the application.
+
+### 1. System Packages & Python 3.11+
+
+Update your package lists and install standard build tools, `curl`, and Python development packages:
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install curl build-essential python3 python3-pip python3-venv -y
+```
+
+### 2. Node.js & npm (Frontend Runtime)
+
+Install Node.js (v18+ recommended) using the NodeSource repository:
+```bash
+# Set up NodeSource repository
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
+# Install Node.js
+sudo apt install -y nodejs
+```
+
+### 3. Docker & NVIDIA Container Toolkit (For Local NIM/Nemotron GPUs)
+
+To leverage on-device NVIDIA GPUs (e.g. Blackwell GB10/ASUS GB10 or RTX cards) to run local **NVIDIA NIMs** with the `--gpus all` flag, install Docker and the **NVIDIA Container Toolkit**:
+
+```bash
+# 1. Install Docker (if not installed)
+sudo apt install -y docker.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER  # Log out and log back in to apply group changes!
+
+# 2. Configure NVIDIA Container Toolkit
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt update
+sudo apt install -y nvidia-container-toolkit
+
+# 3. Configure and restart Docker container runtime
+sudo nvidia-container-toolkit-config --mode=docker
+sudo systemctl restart docker
+```
+
+### 4. Running the Full Stack
+
+Now you are ready to run both backend and frontend.
+
+**Terminal 1: Backend**
+```bash
+# Install uv package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env  # refresh shell env to load 'uv'
+
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+**Terminal 2: Frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open your browser at **http://localhost:3000** to access the property configurator.
+
+---
+
 ## Running locally
 
 ### Backend setup

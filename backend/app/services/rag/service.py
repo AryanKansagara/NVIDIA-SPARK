@@ -9,6 +9,7 @@ server is down.
 import asyncio
 import logging
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import chromadb
@@ -36,7 +37,11 @@ class RAGService:
         self.settings = settings
         store_path = Path(settings.rag_vector_store_path)
         store_path.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(path=str(store_path))
+        # anonymized_telemetry=False keeps everything on-device (no usage events leave the box).
+        self._client = chromadb.PersistentClient(
+            path=str(store_path),
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
         self._collection = self._client.get_or_create_collection(
             name=_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
@@ -45,6 +50,10 @@ class RAGService:
             _NemoRetriever(settings) if settings.nemo_retriever_enabled else None
         )
         self._reranker = _Reranker(settings) if settings.rag_rerank_enabled else None
+        # NVIDIA cuVS GPU index, built lazily from the Chroma store on first query.
+        self._use_cuvs = settings.vector_backend == "cuvs"
+        self._cuvs = None
+        self._cuvs_built = False
 
     def is_ready(self) -> bool:
         if self._nemo is not None:
@@ -69,7 +78,7 @@ class RAGService:
             except Exception as exc:
                 logger.warning("NemoRetriever failed (%s), falling back to ChromaDB", exc)
 
-        candidates = await self._chroma_candidates(text)
+        candidates = await self._candidates(text)
         if not candidates:
             return []
 
@@ -80,6 +89,39 @@ class RAGService:
                 logger.warning("Reranker unavailable (%s) — using vector order", exc)
 
         return candidates[:n]
+
+    async def _candidates(self, text: str) -> list[Passage]:
+        """cuVS GPU search preferred; transparently fall back to ChromaDB (CPU)."""
+        if self._use_cuvs:
+            try:
+                cuvs_hits = await self._cuvs_candidates(text)
+                if cuvs_hits:
+                    return cuvs_hits
+            except Exception as exc:
+                logger.warning("cuVS search failed (%s) — falling back to ChromaDB", exc)
+        return await self._chroma_candidates(text)
+
+    def _ensure_cuvs(self) -> None:
+        if self._cuvs_built:
+            return
+        self._cuvs_built = True  # only attempt once per process
+        from app.services.rag.cuvs_store import CuvsIndex
+
+        index = CuvsIndex()
+        rows = index.build_from_collection(self._collection)
+        if rows:
+            self._cuvs = index
+            logger.info("cuVS active: %d vectors, kind=%s", rows, index.kind)
+
+    async def _cuvs_candidates(self, text: str) -> list[Passage]:
+        embedding = await self._embed(text)
+        await asyncio.to_thread(self._ensure_cuvs)
+        if self._cuvs is None or not self._cuvs.ready():
+            return []
+        hits = await asyncio.to_thread(
+            self._cuvs.search, embedding, self.settings.rag_candidate_k
+        )
+        return [Passage(text=t, source=s, score=score) for t, s, score in hits]
 
     async def _chroma_candidates(self, text: str) -> list[Passage]:
         if not self._collection.count():
@@ -165,3 +207,13 @@ class _NemoRetriever:
                 )
             )
         return out
+
+
+@lru_cache
+def get_rag_service() -> "RAGService":
+    """Process-wide shared RAGService so chat, report, and /rag/reload all mutate
+    the same in-memory Chroma collection (lets reload pick up new PDFs with no
+    server restart)."""
+    from app.core.config import get_settings
+
+    return RAGService(get_settings())

@@ -1,7 +1,13 @@
+import os
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Keep everything on-device: disable ChromaDB's anonymized usage telemetry before
+# chromadb is imported anywhere. config.py is imported earliest across the app.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "none")
 
 
 class Settings(BaseSettings):
@@ -28,6 +34,10 @@ class Settings(BaseSettings):
     rag_embedding_model: str = "nvidia/llama-3.2-nv-embedqa-1b-v2"
     rag_vector_store_path: str = "data/vector_store"
     rag_land_laws_dir: str = "data/land_laws"
+    # Vector search backend: "chroma" (CPU, default) or "cuvs" (NVIDIA GPU index
+    # built from the Chroma store, with automatic Chroma fallback). ChromaDB is the
+    # persistence layer either way. cuVS support lives in services/rag/cuvs_store.py.
+    vector_backend: str = "chroma"
     rag_n_results: int = 3
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 100
@@ -57,6 +67,14 @@ class Settings(BaseSettings):
     nemotron_model: str = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
     nemo_retriever_enabled: bool = False
     nemo_retriever_url: str = ""
+    # On-device speech-to-text (NeMo Nemotron streaming ASR). Heavy deps (nemo/torch)
+    # may be absent — the /transcribe route degrades to HTTP 503 and the UI hides its mic.
+    asr_enabled: bool = True
+    asr_model_path: str = (
+        "/home/asus/Desktop/NVIDIA_SPARK_HACK/"
+        "nvidia--nemotron-speech-streaming-en-0.6b/"
+        "nemotron-speech-streaming-en-0.6b.nemo"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

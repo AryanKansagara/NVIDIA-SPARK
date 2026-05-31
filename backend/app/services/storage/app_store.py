@@ -128,6 +128,13 @@ class AppStore:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
+    def delete_report(self, report_id: str) -> bool:
+        with self._lock:
+            rows = self._con.execute(
+                "DELETE FROM saved_reports WHERE report_id = ? RETURNING report_id", [report_id]
+            ).fetchall()
+        return len(rows) > 0
+
     # ---- chat turns (short-term memory) -----------------------------
     def add_turn(self, session_id: str, role: str, content: str) -> None:
         with self._lock:

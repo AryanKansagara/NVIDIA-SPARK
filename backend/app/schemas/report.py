@@ -14,6 +14,11 @@ class ReportRequest(BaseModel):
     down_payment_percent: float = Field(default=20.0, ge=5, le=100)
     mortgage_rate: float = Field(default=5.5, gt=0, le=30)
     amortization_years: int = Field(default=25, ge=5, le=35)
+    # When the address was chosen from an autocomplete suggestion the client sends
+    # the exact coordinates so the backend can skip the ambiguous re-geocode and pin
+    # the map precisely where the user selected.
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class ResolvedProperty(BaseModel):
@@ -39,6 +44,39 @@ class RiskFlag(BaseModel):
     severity: Severity
     title: str
     message: str
+    confidence: Literal["High", "Medium", "Low"] = "High"
+    detail: str | None = None  # long evidence explanation rendered in the card body
+    say_at_table: str | None = None  # negotiation script ("say this at the table")
+    leverage_low: int | None = None  # supports $X price-reduction request (low end)
+    leverage_high: int | None = None  # supports $X price-reduction request (high end)
+    source: str | None = None  # dataset / API the evidence came from
+
+
+class CompositeSignal(BaseModel):
+    signal_name: str
+    signal_type: Literal["inferred"] = "inferred"
+    value: Literal["Low", "Medium", "Elevated", "High"]
+    label: str
+    factors: list[str]
+    disclaimer: str
+    confidence: Literal["Low"] = "Low"
+
+
+class CostRow(BaseModel):
+    key: str
+    label: str
+    annual: int | None = None  # None for one-time costs (LTT, CMHC premium)
+    total: int  # total over the selected horizon
+    confidence: Literal["High", "Medium", "Low"]
+    one_time: bool = False
+    is_credit: bool = False  # transit dividend renders as a credit (negative)
+
+
+class AgentReasoning(BaseModel):
+    agent: str  # "intake" | "data_retrieval" | "analysis" | "synthesis"
+    title: str  # "AGENT 1 — INTAKE + PLANNING"
+    mode: str  # "LLM CALL #1" | "DETERMINISTIC, ASYNC" | ...
+    body: str
 
 
 class EvidenceSummary(BaseModel):
@@ -103,5 +141,8 @@ class ReportResponse(BaseModel):
     monte_carlo: MonteCarloResult | None = None
     monte_carlo_horizons: dict[str, MonteCarloResult] = Field(default_factory=dict)
     horizon_costs: dict[str, int] = Field(default_factory=dict)
+    composite_signals: list[CompositeSignal] = Field(default_factory=list)
+    cost_rows_by_horizon: dict[str, list[CostRow]] = Field(default_factory=dict)
+    agent_reasoning: list[AgentReasoning] = Field(default_factory=list)
     map_geometry: MapGeometry | None = None
     pipeline_trace: list[PipelineStep] = Field(default_factory=list)

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
 from app.services.memory.memory_service import MemoryService
-from app.services.rag.service import RAGService
+from app.services.rag.service import get_rag_service
 from app.services.web.search import WebSearchService
 
 router = APIRouter()
@@ -17,9 +17,8 @@ def _memory() -> MemoryService:
     return MemoryService(get_settings())
 
 
-@lru_cache
-def _rag() -> RAGService:
-    return RAGService(get_settings())
+# Shared, process-wide RAG instance (see rag.service.get_rag_service).
+_rag = get_rag_service
 
 
 @lru_cache

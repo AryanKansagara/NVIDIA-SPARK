@@ -5,6 +5,7 @@ from functools import lru_cache
 from app.core.config import Settings, get_settings
 from app.schemas.debug import DevelopmentDebugResponse, FloodDebugResponse, GeocodeResponse, HeritageDebugResponse
 from app.schemas.report import (
+    AgentReasoning,
     CommunityInsight,
     EvidenceSummary,
     MapGeometry,
@@ -18,9 +19,9 @@ from app.services.data_sources.development import DevelopmentService
 from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HeritageService
 from app.services.engine.report_engine import EngineInput, ReportEngine
-from app.services.geocoding.service import GeocodingService
+from app.services.geocoding.service import GeocodeResult, GeocodingService
 from app.services.gpu.monte_carlo import MonteCarloSimulator
-from app.services.rag.service import RAGService
+from app.services.rag.service import get_rag_service
 from app.services.storage.app_store import get_app_store
 from app.services.synthesis.service import SynthesisService
 
@@ -33,7 +34,7 @@ class ReportService:
         self.flood_service = FloodService(settings)
         self.development_service = DevelopmentService()
         self.engine = ReportEngine(settings)
-        self.rag = RAGService(settings)
+        self.rag = get_rag_service()  # shared instance so /rag/reload refreshes it too
         self.synthesis = SynthesisService(settings)
         self.monte_carlo = MonteCarloSimulator(
             n_sims=settings.monte_carlo_n_sims,
@@ -50,6 +51,9 @@ class ReportService:
             source=location.source,
             raw_display_name=location.raw_display_name,
         )
+
+    async def suggest_address(self, address: str) -> list[dict]:
+        return await self.geocoder.suggest(address)
 
     async def debug_heritage(self, address: str) -> HeritageDebugResponse:
         location = await self.geocoder.geocode(address)
@@ -155,6 +159,64 @@ class ReportService:
             notes=notes,
         )
 
+    def _agent_reasoning(
+        self, payload, location, heritage, flood, development, engine_output, law_context, synth
+    ) -> list[AgentReasoning]:
+        """Four-agent narration. Agents 2 & 3 are composed deterministically from the
+        evidence and engine figures; Agents 1 & 4 use the LLM narration when available,
+        falling back to a deterministic string so the panel always renders."""
+        kn = engine_output.key_numbers
+
+        # Agent 1 — Intake + Planning (LLM, deterministic fallback)
+        intake = synth.intake_reasoning or (
+            f"Geocoded '{payload.address}' → {location.latitude:.4f}, {location.longitude:.4f} "
+            f"({location.source}). Buyer profile: {payload.buyer_profile}. Planned lookups: "
+            f"heritage register, TRCA flood plain, development applications (500 m), then the "
+            f"deterministic cost engine and GPU Monte Carlo."
+        )
+
+        # Agent 2 — Data Retrieval (deterministic, async)
+        data_retrieval = (
+            f"heritage_register: {heritage.status} ({heritage.source}). "
+            f"trca_flood: {'intersects flood plain' if flood.in_flood_zone else 'no intersection'} "
+            f"({flood.source}). development_applications: {development.application_count_500m} "
+            f"within 500 m → {development.intensity} intensity ({development.source})."
+        )
+        if law_context:
+            data_retrieval += f" RAG land-law context retrieved ({len(law_context)} excerpt(s))."
+
+        # Agent 3 — Analysis + Cost (deterministic, no LLM)
+        above_pct = round((engine_output.total_cost - payload.list_price) / payload.list_price * 100)
+        analysis = (
+            f"Land transfer tax: ${kn.land_transfer_tax_total:,} net"
+            f"{' (first-time rebate applied)' if payload.buyer_profile == 'first_time' else ' (no FTB rebate)'}. "
+            f"Property tax: ${kn.property_tax_10y:,} over 10 yr. "
+            f"Mortgage (base): ${kn.mortgage_cost_10y_base:,}/10yr. "
+            f"CMHC premium: ${kn.insured_mortgage_premium:,}. "
+            f"Transit dividend: ${kn.transit_dividend:,} offset. "
+            f"True 10-year cost: ${engine_output.total_cost:,} (~{above_pct}% above list). "
+            f"All dollar figures are computed here; the LLM never invents numbers."
+        )
+
+        # Agent 4 — Synthesis (LLM, deterministic fallback)
+        leverage = sum(
+            (f.leverage_high or 0) for f in engine_output.flags if f.leverage_high is not None
+        )
+        red = sum(1 for f in engine_output.flags if f.severity == "red")
+        verdict = "RED" if red >= 2 else "YELLOW" if red == 1 or any(f.severity == "yellow" for f in engine_output.flags) else "GREEN"
+        synthesis = synth.synthesis_reasoning or (
+            f"Verdict: {verdict}. Assembled up to ${leverage:,} of negotiation leverage from the "
+            f"active risk flags. All dollar figures came from the deterministic engine (Agent 3); "
+            f"the narrative only formats them."
+        )
+
+        return [
+            AgentReasoning(agent="intake", title="AGENT 1 — INTAKE + PLANNING", mode="LLM CALL #1", body=intake),
+            AgentReasoning(agent="data_retrieval", title="AGENT 2 — DATA RETRIEVAL", mode="DETERMINISTIC, ASYNC", body=data_retrieval),
+            AgentReasoning(agent="analysis", title="AGENT 3 — ANALYSIS + COST", mode="DETERMINISTIC, NO LLM", body=analysis),
+            AgentReasoning(agent="synthesis", title="AGENT 4 — SYNTHESIS", mode="LLM CALL #2", body=synthesis),
+        ]
+
     async def _build_engine(self, payload, heritage, flood, development):
         return self.engine.build(
             EngineInput(
@@ -189,8 +251,23 @@ class ReportService:
             )
             return result
 
-        # Group 0: geocode (everything downstream depends on it)
-        location = await _timed("geocode", 0, self.geocoder.geocode(payload.address))
+        # Group 0: geocode (everything downstream depends on it). If the client already
+        # resolved exact coordinates via the autocomplete suggestion, trust them and skip
+        # the re-geocode so the map pins precisely what the user selected.
+        if payload.latitude is not None and payload.longitude is not None:
+            async def _prelocated() -> GeocodeResult:
+                return GeocodeResult(
+                    address=payload.address,
+                    normalized_address=self.geocoder._normalize(payload.address),
+                    latitude=payload.latitude,
+                    longitude=payload.longitude,
+                    source="client-suggestion",
+                    raw_display_name=payload.address,
+                )
+
+            location = await _timed("geocode", 0, _prelocated())
+        else:
+            location = await _timed("geocode", 0, self.geocoder.geocode(payload.address))
 
         # Group 1: three data-source agents run concurrently
         heritage, flood, development = await asyncio.gather(
@@ -266,8 +343,9 @@ class ReportService:
 
         law_context = await _timed("rag", 4, _run_rag())
 
-        # Group 5: synthesis (local Nemotron LLM)
-        summary_text = await _timed(
+        # Group 5: synthesis (local Nemotron LLM) — returns the buyer summary plus
+        # LLM-narrated reasoning for Agent 1 (intake) and Agent 4 (synthesis).
+        synth = await _timed(
             "synthesis",
             5,
             self.synthesis.synthesize(
@@ -283,6 +361,11 @@ class ReportService:
                 horizons=monte_carlo_horizons,
                 profile=get_app_store(self.settings.duckdb_path).get_profile(),
             ),
+        )
+        summary_text = synth.summary
+
+        agent_reasoning = self._agent_reasoning(
+            payload, location, heritage, flood, development, engine_output, law_context, synth
         )
 
         return ReportResponse(
@@ -323,6 +406,9 @@ class ReportService:
             monte_carlo=monte_carlo,
             monte_carlo_horizons=monte_carlo_horizons,
             horizon_costs=engine_output.horizon_totals,
+            composite_signals=engine_output.composite_signals,
+            cost_rows_by_horizon=engine_output.cost_rows_by_horizon,
+            agent_reasoning=agent_reasoning,
             map_geometry=map_geometry,
             pipeline_trace=sorted(trace, key=lambda s: s.started_ms),
             summary_text=summary_text,
