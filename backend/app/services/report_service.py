@@ -152,6 +152,20 @@ class ReportService:
             except Exception:
                 pass
 
+        try:
+            summary_text = await self.synthesis.synthesize(
+                address=payload.address,
+                list_price=payload.list_price,
+                buyer_profile=payload.buyer_profile,
+                engine_output=engine_output,
+                heritage=heritage,
+                flood=flood,
+                development=development,
+                law_context=law_context,
+            )
+        except Exception:
+            summary_text = None
+
         return ReportResponse(
             property=ResolvedProperty(
                 address=location.address,
@@ -226,16 +240,7 @@ class ReportService:
                 },
             ),
             key_numbers=engine_output.key_numbers,
-            summary_text=await self.synthesis.synthesize(
-                address=payload.address,
-                list_price=payload.list_price,
-                buyer_profile=payload.buyer_profile,
-                engine_output=engine_output,
-                heritage=heritage,
-                flood=flood,
-                development=development,
-                law_context=law_context,
-            ),
+            summary_text=summary_text,
         )
 
 

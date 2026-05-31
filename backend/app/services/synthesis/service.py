@@ -87,7 +87,8 @@ class SynthesisService:
                 heritage, flood, development, law_context or [],
             )
         except httpx.ConnectError:
-            raise  # Surface immediately — NIM container not running
+            # NIM not reachable — fall back to deterministic summary so the report still completes
+            return _templated_summary(address, list_price, buyer_profile, engine_output)
         except Exception:
             return _templated_summary(address, list_price, buyer_profile, engine_output)
 
