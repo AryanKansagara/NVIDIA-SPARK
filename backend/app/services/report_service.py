@@ -1,9 +1,11 @@
 import asyncio
+import json
 from functools import lru_cache
+from pathlib import Path
 
 from app.core.config import Settings, get_settings
 from app.schemas.debug import DevelopmentDebugResponse, FloodDebugResponse, GeocodeResponse, HeritageDebugResponse
-from app.schemas.report import EvidenceSummary, ReportRequest, ReportResponse, ResolvedProperty
+from app.schemas.report import CompositeSignalOut, EvidenceSummary, ReportRequest, ReportResponse, ResolvedProperty, SignalOut
 from app.services.data_sources.development import DevelopmentService
 from app.services.data_sources.flood import FloodService
 from app.services.data_sources.heritage import HCDService, HeritageService
@@ -13,6 +15,7 @@ from app.services.engine.report_engine import EngineInput, ReportEngine
 from app.services.geocoding.service import GeocodingService
 from app.services.rag.service import RAGService
 from app.services.synthesis.service import SynthesisService
+from app.services.utils import slugify
 
 
 class ReportService:
@@ -80,6 +83,17 @@ class ReportService:
             source=development.source,
         )
 
+    def _load_demo_cache(self, address: str) -> dict | None:
+        if not self.settings.demo_mode:
+            return None
+        cache_path = Path(self.settings.demo_cache_dir) / f"{slugify(address)}.json"
+        if cache_path.exists():
+            try:
+                return json.loads(cache_path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
     async def build_report(self, payload: ReportRequest) -> ReportResponse:
         warnings: list[str] = []
         location = await self.geocoder.geocode(payload.address)
@@ -146,11 +160,15 @@ class ReportService:
                 longitude=location.longitude,
                 ward=None,
             ),
+            verdict_level=engine_output.verdict_level,
+            verdict_headline=engine_output.verdict_headline,
             true_10_year_cost=engine_output.total_cost,
             cost_breakdown=engine_output.components,
             mortgage_scenarios=engine_output.scenarios,
             flags=engine_output.flags,
             warnings=warnings,
+            signals=[SignalOut(**s) for s in engine_output.signals],
+            composite_signals=[CompositeSignalOut(**s) for s in engine_output.composite_signals],
             evidence_summary=EvidenceSummary(
                 geocoder={
                     "source": location.source,

@@ -10,13 +10,15 @@ class Settings(BaseSettings):
     geocoder_user_agent: str = "meridian-hackathon/0.1"
     geocoder_country_codes: str = "ca"
     geocoder_city_bias: str = "Toronto, Ontario, Canada"
-    request_timeout_seconds: float = Field(default=12.0, gt=0)
+    request_timeout_seconds: float = Field(default=5.0, gt=0)  # 5s per source per PRD — timeout → UNKNOWN confidence
     property_tax_rate: float = 0.00767311
     property_tax_growth_rate: float = 0.035
     transit_dividend_downtown: int = 87000
     transit_dividend_default: int = 28000
     flood_risk_internal_loading: int = 2500   # internal cost estimate only — never surface in output
     trca_flood_fallback_geojson: str = "data/trca_floodplain_toronto.geojson"
+    demo_mode: bool = False
+    demo_cache_dir: str = "data/demo_cache"
     nim_base_url: str = "http://localhost:8080/v1"
     nim_model: str = "meta/llama-3.1-8b-instruct"
     nim_enabled: bool = True

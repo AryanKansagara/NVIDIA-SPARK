@@ -10,6 +10,12 @@ _CKAN_BASE = "https://ckan0.cf.opendata.inter.prod-toronto.ca/api/3/action"
 _PACKAGE = "development-applications"
 _RADIUS_M = 500
 
+# Only count active OZ/SA applications — exclude Closed (~18,504 records)
+_ACTIVE_STATUSES = frozenset({
+    "Under Review", "Application Received", "Council Approved", "NOAC Issued",
+})
+_RELEVANT_TYPES = frozenset({"OZ", "SA"})
+
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6_371_000
@@ -25,6 +31,8 @@ class DevelopmentService:
         self._records: list[dict] | None = None
         self._lat_key: str | None = None
         self._lon_key: str | None = None
+        self._status_key: str | None = None
+        self._type_key: str | None = None
         self._lock = asyncio.Lock()
 
     async def _ensure_loaded(self) -> None:
@@ -75,6 +83,12 @@ class DevelopmentService:
             self._lon_key = next(
                 (keys[i] for i, u in enumerate(upper) if u in ("LONGITUDE", "LNG", "LON", "GEO_LONGITUDE")), None
             )
+            self._status_key = next(
+                (keys[i] for i, u in enumerate(upper) if "STATUS" in u), None
+            )
+            self._type_key = next(
+                (keys[i] for i, u in enumerate(upper) if u in ("APPLICATION_TYPE", "TYPE", "APP_TYPE")), None
+            )
 
         self._records = records
 
@@ -103,11 +117,20 @@ class DevelopmentService:
 
         count = 0
         for rec in self._records:
+            # Filter to active OZ/SA only — exclude Closed and irrelevant types
+            if self._status_key:
+                status = str(rec.get(self._status_key, "")).strip()
+                if status not in _ACTIVE_STATUSES:
+                    continue
+            if self._type_key:
+                app_type = str(rec.get(self._type_key, "")).strip()
+                if app_type not in _RELEVANT_TYPES:
+                    continue
+
             coords = self._coords(rec)
             if coords is None:
                 continue
             rlat, rlon = coords
-            # Bounding box pre-filter before expensive haversine
             if abs(rlat - location.latitude) > lat_delta:
                 continue
             if abs(rlon - location.longitude) > lon_delta:

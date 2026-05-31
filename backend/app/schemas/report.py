@@ -2,6 +2,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+_REPORT_DISCLAIMER = (
+    "Analysis based on publicly available data current as of 2026. "
+    "Some sources reflect historical snapshots (MPAC assessed values frozen at "
+    "January 1, 2016). This tool surfaces ownership-risk signals and "
+    "due-diligence prompts — it is not financial, legal, or insurance advice."
+)
 
 BuyerProfile = Literal["first_time", "investor", "downsizer"]
 PropertyType = Literal["condo", "condo_townhouse", "semi_detached", "detached_urban", "detached_suburban"]
@@ -10,12 +16,12 @@ Severity = Literal["red", "yellow", "green", "info"]
 
 class ReportRequest(BaseModel):
     address: str = Field(min_length=3)
-    list_price: float = Field(gt=0)
+    list_price: float = Field(ge=100_000, le=10_000_000)
     buyer_profile: BuyerProfile
     property_type: PropertyType = "detached_urban"
     down_payment_percent: float = Field(ge=5, le=100)
-    mortgage_rate: float = Field(gt=0, le=30)
-    amortization_years: int = Field(ge=5, le=35)
+    mortgage_rate: float = Field(ge=0.5, le=15.0)
+    amortization_years: int = Field(ge=15, le=30)
 
 
 class ResolvedProperty(BaseModel):
@@ -43,6 +49,26 @@ class RiskFlag(BaseModel):
     message: str
 
 
+# Standardized signal output (PRD section 2.3)
+class SignalOut(BaseModel):
+    signal_name: str
+    signal_type: Literal["observed", "inferred", "simulated"]
+    value: str
+    confidence: str
+    source: str
+    data_coverage: str
+    message: str
+
+
+class CompositeSignalOut(BaseModel):
+    signal_name: str
+    signal_type: Literal["inferred"] = "inferred"
+    value: str
+    confidence: str = "Low"
+    factors: list[str] = []
+    disclaimer: str = ""
+
+
 class EvidenceSummary(BaseModel):
     geocoder: dict
     heritage: dict
@@ -65,11 +91,17 @@ class KeyNumbers(BaseModel):
 
 class ReportResponse(BaseModel):
     property: ResolvedProperty
+    verdict_level: str       # "RED" | "YELLOW" | "GREEN"
+    verdict_headline: str
     true_10_year_cost: int
     cost_breakdown: list[CostComponent]
     mortgage_scenarios: list[ScenarioCost]
     flags: list[RiskFlag]
     warnings: list[str]
     evidence_summary: EvidenceSummary
+    signals: list[SignalOut]
+    composite_signals: list[CompositeSignalOut]
     key_numbers: KeyNumbers
+    as_of: str = "2026"
+    disclaimer: str = _REPORT_DISCLAIMER
     summary_text: str | None = None

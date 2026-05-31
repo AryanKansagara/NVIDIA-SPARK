@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from app.core.config import Settings
 from app.schemas.report import CostComponent, KeyNumbers, RiskFlag, ScenarioCost, Severity
-from app.services.data_sources.models import ActivePermitsEvidence, BuildingHealthEvidence, ClearedPermitsEvidence, DevelopmentEvidence, FloodEvidence, HCDEvidence, HeritageEvidence
+from app.services.data_sources.models import ActivePermitsEvidence, BuildingHealthEvidence, ClearedPermitsEvidence, CompositeSignal, DevelopmentEvidence, FloodEvidence, HCDEvidence, HeritageEvidence
 
 
 @dataclass
@@ -30,7 +30,11 @@ class EngineOutput:
     scenarios: list[ScenarioCost]
     flags: list[RiskFlag]
     key_numbers: KeyNumbers
-    property_tax_meta: dict  # av_low, av_mid, av_high, disclaimer
+    property_tax_meta: dict
+    signals: list[dict]
+    composite_signals: list[dict]
+    verdict_level: str    # "RED" | "YELLOW" | "GREEN"
+    verdict_headline: str
 
 
 class ReportEngine:
@@ -152,6 +156,22 @@ class ReportEngine:
             transit_dividend=transit_dividend,
         )
 
+        signals = [
+            vars(payload.heritage.to_signal()),
+            vars(payload.hcd.to_signal()),
+            vars(payload.active_permits.to_signal()),
+            vars(payload.cleared_permits.to_signal()),
+            vars(payload.building_health.to_signal()),
+            vars(payload.flood.to_signal()),
+            vars(payload.development.to_signal()),
+        ]
+        composite_signals = [
+            vars(self._maintenance_complexity_signal(payload)),
+            vars(self._future_tax_pressure_signal(payload)),
+        ]
+
+        verdict_level, verdict_headline = self._derive_verdict(payload, flags, composite_signals)
+
         return EngineOutput(
             total_cost=total_cost,
             components=components,
@@ -164,6 +184,10 @@ class ReportEngine:
                 "av_high": av_high,
                 "disclaimer": self._PROPERTY_TAX_DISCLAIMER,
             },
+            signals=signals,
+            composite_signals=composite_signals,
+            verdict_level=verdict_level,
+            verdict_headline=verdict_headline,
         )
 
     def _flags(
@@ -398,6 +422,84 @@ class ReportEngine:
             )
         )
         return flags
+
+    def _derive_verdict(
+        self,
+        payload: "EngineInput",
+        flags: list[RiskFlag],
+        composite_signals: list[dict],
+    ) -> tuple[str, str]:
+        _RED_TRIGGERS = {
+            "heritage": payload.heritage.status in {"part_iv", "part_iv_or_sensitive_core"},
+            "structural": payload.active_permits.structural_count > 0,
+            "flood": payload.flood.status == "elevated",
+        }
+        _YELLOW_TRIGGERS = {
+            "medium_flag": any(f.severity == "yellow" for f in flags),
+            "composite_elevated": any(
+                cs.get("value") in {"Elevated", "High"} for cs in composite_signals
+            ),
+        }
+
+        if any(_RED_TRIGGERS.values()):
+            return "RED", "Elevated due-diligence recommended before this purchase."
+        if any(_YELLOW_TRIGGERS.values()):
+            return "YELLOW", "Some ownership risks identified — review flagged signals."
+        return "GREEN", "No concerns identified in available city data."
+
+    _HERITAGE_MATCH_SET = {"part_iv", "part_v", "listed", "part_iv_or_sensitive_core"}
+
+    def _maintenance_complexity_signal(self, payload: "EngineInput") -> CompositeSignal:
+        factors: list[str] = []
+        if payload.active_permits.structural_count > 0:
+            factors.append("Active structural permit")
+        if payload.cleared_permits.chronic_issues:
+            factors.append("Multiple structural permits")
+        if payload.cleared_permits.deferred_maintenance:
+            factors.append("Deferred maintenance signal")
+        if payload.building_health.status == "elevated" and payload.building_health.path == "rentsafeto":
+            factors.append("Low RentSafeTO score")
+        if payload.heritage.status in self._HERITAGE_MATCH_SET:
+            factors.append("Heritage designation")
+        if payload.flood.status == "elevated":
+            factors.append("Flood zone exposure")
+
+        if len(factors) >= 3:
+            value = "Elevated"
+        elif len(factors) >= 1:
+            value = "Medium"
+        else:
+            value = "Low"
+
+        return CompositeSignal(
+            signal_name="Maintenance Complexity Signal",
+            signal_type="inferred",
+            value=value,
+            confidence="Low",
+            factors=factors,
+            disclaimer="This is an inferred signal and not evidence of a historical special assessment.",
+        )
+
+    def _future_tax_pressure_signal(self, payload: "EngineInput") -> CompositeSignal:
+        count = payload.development.application_count_500m
+        if count >= 10:
+            value = "High"
+            message_hint = "Significant redevelopment activity nearby may affect future neighbourhood character and values."
+        elif count >= 5:
+            value = "Medium"
+            message_hint = "Early intensification signals detected nearby."
+        else:
+            value = "Low"
+            message_hint = "Low development pressure near this property."
+
+        return CompositeSignal(
+            signal_name="Future Tax Pressure Signal",
+            signal_type="inferred",
+            value=value,
+            confidence="Low",
+            factors=[f"{count} active OZ/SA applications within 500m"],
+            disclaimer="This is a neighbourhood signal, not an MPAC reassessment prediction.",
+        )
 
     def _land_transfer_tax_ontario(self, price: float) -> float:
         bands = [
