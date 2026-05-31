@@ -1,17 +1,15 @@
 "use client";
 
 import { type ComponentType, type FormEvent, type ReactNode, useState } from "react";
-import { Home, Loader2, ReceiptText, RefreshCw, UserRound } from "lucide-react";
+import { Home, Percent, ReceiptText, UserRound } from "lucide-react";
 import { Panel } from "@/components/ui/panel";
 import type { BuyerProfile, MeridianFormState } from "@/lib/report";
-import type { PipelineStatus } from "@/lib/pipeline-api";
 
 type InputCardProps = {
   initialValues: MeridianFormState;
-  onSubmit: (values: MeridianFormState) => void;
-  onRefreshPipeline?: () => void;
-  pipelineStatus?: PipelineStatus | null;
-  isRefreshing?: boolean;
+  onSubmit: (values: MeridianFormState) => void | Promise<void>;
+  isLoading?: boolean;
+  apiBaseUrl?: string;
 };
 
 type FieldProps = {
@@ -43,19 +41,21 @@ function Field({ label, hint, icon: Icon, children }: FieldProps) {
 export function InputCard({
   initialValues,
   onSubmit,
-  onRefreshPipeline,
-  pipelineStatus,
-  isRefreshing = false,
+  isLoading = false,
+  apiBaseUrl,
 }: InputCardProps) {
   const [form, setForm] = useState(initialValues);
 
-  function update<K extends keyof MeridianFormState>(key: K, value: MeridianFormState[K]) {
+  function update<K extends keyof MeridianFormState>(
+    key: K,
+    value: MeridianFormState[K],
+  ) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSubmit(form);
+    void onSubmit(form);
   }
 
   return (
@@ -70,8 +70,8 @@ export function InputCard({
           </h2>
           <p className="text-sm leading-6 text-slate">
             Enter the property and mortgage assumptions here. The preview on the
-            right recomputes using the same deterministic logic the backend will
-            eventually own.
+            right now comes from the GX10 backend when available, with a local
+            deterministic fallback if the API request fails.
           </p>
         </div>
         <div className="space-y-3">
@@ -95,8 +95,8 @@ export function InputCard({
             <input
               className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
               type="number"
-              min={1000}
-              step={1000}
+              min={1}
+              step={1}
               value={form.listPrice}
               onChange={(event) => update("listPrice", Number(event.target.value))}
             />
@@ -109,49 +109,78 @@ export function InputCard({
             <select
               className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
               value={form.buyerProfile}
-              onChange={(event) => update("buyerProfile", event.target.value as BuyerProfile)}
+              onChange={(event) =>
+                update("buyerProfile", event.target.value as BuyerProfile)
+              }
             >
               <option value="first_time">First-time buyer</option>
               <option value="investor">Investor</option>
               <option value="downsizer">Downsizer</option>
             </select>
           </Field>
-        </div>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-mist transition hover:bg-[#1C3541]"
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field
+              label="Down Payment"
+              hint="Percent of purchase price."
+              icon={Percent}
             >
-              Generate Report
-            </button>
-            {onRefreshPipeline && (
-              <button
-                type="button"
-                disabled={isRefreshing}
-                onClick={onRefreshPipeline}
-                className="flex items-center gap-2 rounded-full border border-[#D7E7E2] bg-mist/60 px-5 py-3 text-sm font-semibold text-moss transition hover:bg-mist disabled:opacity-60"
-              >
-                {isRefreshing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                {isRefreshing ? "Refreshing…" : "Refresh Live Data"}
-              </button>
-            )}
+              <input
+                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
+                type="number"
+                min={5}
+                max={100}
+                step={1}
+                value={form.downPaymentPercent}
+                onChange={(event) =>
+                  update("downPaymentPercent", Number(event.target.value))
+                }
+              />
+            </Field>
+            <Field
+              label="Rate"
+              hint="Starting mortgage rate."
+              icon={Percent}
+            >
+              <input
+                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
+                type="number"
+                min={0.5}
+                max={20}
+                step={0.01}
+                value={form.mortgageRate}
+                onChange={(event) => update("mortgageRate", Number(event.target.value))}
+              />
+            </Field>
+            <Field
+              label="Amortization"
+              hint="Years used for the payment model."
+              icon={Percent}
+            >
+              <input
+                className="w-full rounded-2xl border border-white bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-moss"
+                type="number"
+                min={5}
+                max={35}
+                step={1}
+                value={form.amortizationYears}
+                onChange={(event) =>
+                  update("amortizationYears", Number(event.target.value))
+                }
+              />
+            </Field>
           </div>
-          {pipelineStatus && (
-            <p className="text-xs text-slate">
-              Data refreshed{" "}
-              {pipelineStatus.refreshedAt.toLocaleTimeString("en-CA", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}{" "}
-              · {pipelineStatus.heritageRows.toLocaleString()} heritage ·{" "}
-              {pipelineStatus.developmentRows.toLocaleString()} development
-            </p>
-          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-mist transition hover:bg-[#1C3541] disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isLoading ? "Requesting Report..." : "Recalculate Preview"}
+          </button>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate">
+            API target: {apiBaseUrl ?? "not configured"}
+          </p>
         </div>
       </form>
     </Panel>

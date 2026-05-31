@@ -1,27 +1,6 @@
-import type {
-  BreakdownPoint,
-  MapGeometry,
-  MeridianFormState,
-  MeridianReport,
-  MonteCarloDistribution,
-  ScenarioPoint,
-} from "./report";
+import type { MeridianReport, MeridianFormState } from "@/lib/report";
 
-const FILL_COLORS: Record<string, string> = {
-  mortgage_base: "#10212B",
-  land_transfer_tax: "#E16B47",
-  property_tax_10y: "#B99239",
-  risk_adjustments: "#8C5B4A",
-  transit_dividend: "#2B6A57",
-};
-
-type BackendFlag = {
-  severity: "red" | "yellow" | "green" | "info";
-  title: string;
-  message: string;
-};
-
-type BackendReport = {
+type BackendReportResponse = {
   property: {
     address: string;
     normalized_address: string;
@@ -30,9 +9,20 @@ type BackendReport = {
     ward: string | null;
   };
   true_10_year_cost: number;
-  cost_breakdown: { key: string; label: string; amount: number }[];
-  mortgage_scenarios: { scenario: "bull" | "base" | "bear"; total_cost: number }[];
-  flags: BackendFlag[];
+  cost_breakdown: Array<{
+    key: string;
+    label: string;
+    amount: number;
+  }>;
+  mortgage_scenarios: Array<{
+    scenario: "bull" | "base" | "bear";
+    total_cost: number;
+  }>;
+  flags: Array<{
+    severity: "red" | "yellow" | "green" | "info";
+    title: string;
+    message: string;
+  }>;
   warnings: string[];
   key_numbers: {
     land_transfer_tax_total: number;
@@ -42,134 +32,101 @@ type BackendReport = {
     transit_dividend: number;
   };
   summary_text: string | null;
-  monte_carlo: {
-    p10: number;
-    p50: number;
-    p90: number;
-    mean: number;
-    trajectories_sampled: number;
-    elapsed_ms: number | null;
-  } | null;
-  map_geometry: {
-    property_lat: number;
-    property_lon: number;
-    flood_polygon_geojson: object | null;
-    dev_pressure_radius_m: number;
-    community_insights: {
-      headline: string;
-      median_estimate: number;
-      typical_range_low: number;
-      typical_range_high: number;
-      price_per_sqft_estimate: number;
-      trend: "rising" | "stable" | "cooling";
-      notes: string[];
-    } | null;
-  } | null;
 };
 
-const SCENARIO_ORDER = { bull: 0, base: 1, bear: 2 } as const;
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ??
+  "http://127.0.0.1:8000";
 
-function mapReport(backend: BackendReport, inputs: MeridianFormState): MeridianReport {
-  const trueCost = backend.true_10_year_cost;
-  const aboveListPercent = Math.round(((trueCost - inputs.listPrice) / inputs.listPrice) * 100);
-
-  const components: BreakdownPoint[] = backend.cost_breakdown.map((c) => ({
-    label: c.label,
-    value: c.amount,
-    fill: FILL_COLORS[c.key] ?? "#888888",
-  }));
-
-  const scenarios: ScenarioPoint[] = [...backend.mortgage_scenarios]
-    .sort((a, b) => SCENARIO_ORDER[a.scenario] - SCENARIO_ORDER[b.scenario])
-    .map((s) => ({
-      scenario: (s.scenario.charAt(0).toUpperCase() + s.scenario.slice(1)) as ScenarioPoint["scenario"],
-      cost: s.total_cost,
-    }));
-
-  const flags: MeridianReport["flags"] = { red: [], yellow: [], green: [] };
-  for (const flag of backend.flags) {
-    const text = `${flag.title} — ${flag.message}`;
-    if (flag.severity === "red") flags.red.push(text);
-    else if (flag.severity === "yellow") flags.yellow.push(text);
-    else if (flag.severity === "green") flags.green.push(text);
-  }
-  for (const warning of backend.warnings) {
-    flags.yellow.push(warning);
-  }
-
-  const summary =
-    backend.summary_text ??
-    `${backend.property.normalized_address} — estimated true 10-year cost is ${trueCost.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })}, about ${aboveListPercent}% above list price.`;
-
-  const monteCarlo: MonteCarloDistribution | null = backend.monte_carlo
-    ? {
-        p10: backend.monte_carlo.p10,
-        p50: backend.monte_carlo.p50,
-        p90: backend.monte_carlo.p90,
-        mean: backend.monte_carlo.mean,
-        trajectoriesSampled: backend.monte_carlo.trajectories_sampled,
-        elapsedMs: backend.monte_carlo.elapsed_ms,
-      }
-    : null;
-
-  const mapGeometry: MapGeometry | null = backend.map_geometry
-    ? {
-        propertyLat: backend.map_geometry.property_lat,
-        propertyLon: backend.map_geometry.property_lon,
-        floodPolygonGeojson: backend.map_geometry.flood_polygon_geojson,
-        devPressureRadiusM: backend.map_geometry.dev_pressure_radius_m,
-        communityInsights: backend.map_geometry.community_insights
-          ? {
-              headline: backend.map_geometry.community_insights.headline,
-              medianEstimate: backend.map_geometry.community_insights.median_estimate,
-              typicalRangeLow: backend.map_geometry.community_insights.typical_range_low,
-              typicalRangeHigh: backend.map_geometry.community_insights.typical_range_high,
-              pricePerSqftEstimate: backend.map_geometry.community_insights.price_per_sqft_estimate,
-              trend: backend.map_geometry.community_insights.trend,
-              notes: backend.map_geometry.community_insights.notes,
-            }
-          : null,
-      }
-    : null;
-
-  return {
-    summary,
-    trueCost,
-    aboveListPercent,
-    transitDividend: backend.key_numbers.transit_dividend,
-    components,
-    scenarios,
-    flags,
-    inputs,
-    keyNumbers: {
-      ltt: backend.key_numbers.land_transfer_tax_total,
-      propertyTax10y: backend.key_numbers.property_tax_10y,
-      insuredPremium: backend.key_numbers.insured_mortgage_premium,
-      baseMortgageCost10y: backend.key_numbers.mortgage_cost_10y_base,
-    },
-    monteCarlo,
-    mapGeometry,
-  };
+function scenarioLabel(value: "bull" | "base" | "bear"): "Bull" | "Base" | "Bear" {
+  if (value === "bull") return "Bull";
+  if (value === "bear") return "Bear";
+  return "Base";
 }
 
-export async function fetchReport(inputs: MeridianFormState): Promise<MeridianReport> {
-  const res = await fetch("/api/v1/report", {
+export async function fetchMeridianReport(
+  input: MeridianFormState,
+): Promise<MeridianReport> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/report`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
-      address: inputs.address,
-      list_price: inputs.listPrice,
-      buyer_profile: inputs.buyerProfile,
-      down_payment_percent: inputs.downPaymentPercent,
-      mortgage_rate: inputs.mortgageRate,
-      amortization_years: inputs.amortizationYears,
+      address: input.address,
+      list_price: input.listPrice,
+      buyer_profile: input.buyerProfile,
+      down_payment_percent: input.downPaymentPercent,
+      mortgage_rate: input.mortgageRate,
+      amortization_years: input.amortizationYears,
     }),
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
-    throw new Error(`Report API ${res.status}: ${detail}`);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Backend request failed with ${response.status}`);
   }
 
-  return mapReport(await res.json(), inputs);
+  const data = (await response.json()) as BackendReportResponse;
+  const aboveListPercent = Math.round(
+    ((data.true_10_year_cost - input.listPrice) / input.listPrice) * 100,
+  );
+
+  const flags = {
+    red: data.flags
+      .filter((flag) => flag.severity === "red")
+      .map((flag) => flag.message),
+    yellow: data.flags
+      .filter((flag) => flag.severity === "yellow" || flag.severity === "info")
+      .map((flag) => flag.message),
+    green: data.flags
+      .filter((flag) => flag.severity === "green")
+      .map((flag) => flag.message),
+  };
+
+  if (data.warnings.length > 0) {
+    flags.yellow.push(...data.warnings);
+  }
+
+  return {
+    summary:
+      data.summary_text ??
+      `${data.property.normalized_address} resolved successfully. Estimated true 10-year cost is ${new Intl.NumberFormat(
+        "en-CA",
+        { style: "currency", currency: "CAD", maximumFractionDigits: 0 },
+      ).format(data.true_10_year_cost)}.`,
+    trueCost: data.true_10_year_cost,
+    aboveListPercent,
+    transitDividend: data.key_numbers.transit_dividend,
+    components: data.cost_breakdown.map((item) => ({
+      label: item.label,
+      value: item.amount,
+      fill:
+        item.key === "mortgage_base"
+          ? "#10212B"
+          : item.key === "land_transfer_tax"
+            ? "#E16B47"
+            : item.key === "property_tax_10y"
+              ? "#B99239"
+              : item.key === "risk_adjustments"
+                ? "#8C5B4A"
+                : "#2B6A57",
+    })),
+    scenarios: data.mortgage_scenarios.map((item) => ({
+      scenario: scenarioLabel(item.scenario),
+      cost: item.total_cost,
+    })),
+    flags,
+    inputs: input,
+    keyNumbers: {
+      ltt: data.key_numbers.land_transfer_tax_total,
+      propertyTax10y: data.key_numbers.property_tax_10y,
+      insuredPremium: data.key_numbers.insured_mortgage_premium,
+      baseMortgageCost10y: data.key_numbers.mortgage_cost_10y_base,
+    },
+  };
+}
+
+export function getApiBaseUrl() {
+  return API_BASE_URL;
 }

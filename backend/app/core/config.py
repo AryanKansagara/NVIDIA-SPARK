@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Meridian Backend"
+    cors_allow_origins: str = "*"
     geocoder_base_url: str = "https://nominatim.openstreetmap.org/search"
     geocoder_user_agent: str = "meridian-hackathon/0.1"
     geocoder_country_codes: str = "ca"

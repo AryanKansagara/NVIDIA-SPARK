@@ -11,18 +11,29 @@ Initial frontend scaffold for the Meridian hackathon demo.
 
 ## Current Status
 
-This first pass includes:
+This frontend now includes:
 
 - app scaffold
 - landing/report screen
-- placeholder report cards
-- chart components using mock data
+- live property intake form
+- backend-driven report request flow
+- local deterministic fallback if the backend request fails
+- chart components
 - map panel placeholder for future Leaflet or Mapbox integration
+
+## Backend Configuration
+
+The frontend reads the backend base URL from:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://100.67.133.13:8000
+```
+
+`.env.local` is configured to point at the GX10 backend by default.
 
 ## Next Build Steps
 
-1. Install dependencies.
-2. Wire a property input form.
-3. Connect FastAPI report endpoint.
-4. Replace mock data with backend response models.
-5. Add a real map layer once geometry output is defined.
+1. Replace the fallback preview logic with full backend data everywhere.
+2. Add a real map layer once geometry output is defined.
+3. Surface backend evidence details in the UI.
+4. Add loading, error, and empty states polish.
