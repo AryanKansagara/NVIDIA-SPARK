@@ -1,0 +1,59 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Meridian computes the **true 10-year cost of ownership** for a Toronto property from an address, list price, and buyer profile. It pulls live Toronto Open Data (CKAN) + TRCA flood data, runs a deterministic financial engine, simulates outcome ranges on GPU, and narrates the result with a local NVIDIA LLM. Designed to run entirely on an NVIDIA DGX Spark (GB10) — no data leaves the device.
+
+## Commands
+
+**Backend** (Python 3.11+, FastAPI; the repo uses `uv`, but a `.venv` also exists at `backend/.venv`):
+```bash
+cd backend
+uv sync                                              # install deps (or: pip install -e ".[dev]")
+uv run uvicorn app.main:app --reload --port 8000     # run; health at /api/v1/health
+uv run pytest                                         # all tests
+uv run pytest tests/test_engine.py::<name>           # single test
+```
+With the existing venv instead of uv: `backend/.venv/bin/uvicorn app.main:app --reload --port 8000` and `backend/.venv/bin/pytest`.
+
+**Frontend** (Next.js 15, TypeScript):
+```bash
+cd frontend
+npm install            # first time
+npm run dev            # http://localhost:3000
+npm run build          # production build
+npm run lint           # eslint
+node_modules/.bin/tsc --noEmit   # typecheck (plain `npx tsc` installs the wrong package)
+```
+
+**Local LLM (optional NIM container)** — model `nvidia/nemotron-nano-12b-v2-vl`, served OpenAI-compatible on port 8080. Requires an NGC key with NIM entitlement (`docker login nvcr.io`). If unavailable, synthesis falls back to the hosted NVIDIA API via `NIM_API_KEY`, or set `NIM_ENABLED=false` to skip narration entirely (the rest of the report still works).
+
+## Architecture
+
+**Request flow:** Frontend form → `frontend/lib/api.ts` `fetchReport` → `POST /api/v1/report`. The frontend proxies `/api/*` to `http://localhost:8000` via rewrites in `frontend/next.config.ts`, so both run on their own ports with no CORS config.
+
+**Backend is a 4-agent pipeline orchestrated by `backend/app/services/report_service.py` (`build_report`):**
+1. **Geocode** (`services/geocoding`) — Nominatim → lat/lon used by everything downstream.
+2. **Data retrieval** (`services/data_sources/{heritage,flood,development}.py`) — async lookups against CKAN (heritage ~12k records, development ~26k records) and TRCA ArcGIS (flood polygon). **Each service silently falls back to a heuristic** if the live API is unreachable; fallbacks surface as `warnings` in the response (string match on `"heuristic"` in the source field).
+3. **Deterministic engine** (`services/engine/report_engine.py`) — owns ALL numbers: LTT, property tax projection, CMHC premium, two-term (60+60 month) mortgage model with bull/base/bear renewal scenarios, risk loadings, transit dividend. The LLM never invents figures.
+4. **Synthesis** (`services/synthesis/service.py`) — sends structured engine output as JSON to the LLM. **Local-first → hosted-API fallback**: tries `nim_local_url` (:8080), then `nim_base_url` (`integrate.api.nvidia.com`) with `nim_api_key`. Returns `None` on any failure so the report degrades gracefully.
+
+Also in `build_report`: a **GPU Monte Carlo** simulation (`services/gpu/monte_carlo.py`, CuPy with NumPy fallback, 10k trajectories) producing the P10/P50/P90 band, **RAG land-law context** (`services/rag/service.py`, NemoRetriever-first with ChromaDB fallback) fed into the synthesis prompt, and **map geometry** including the community-pricing heuristic (`_community_insights`).
+
+**Critical duplication:** the entire financial engine is reimplemented identically in TypeScript at `frontend/lib/report.ts` (`buildPreviewReport`) as an offline fallback used when the backend is unreachable. **Any change to a formula or constant in `report_engine.py` must be mirrored in `report.ts`, and vice versa**, or the preview and live numbers diverge. All such constants are documented in `docs/frontend-parameters.md`.
+
+**Configuration:** all tunables live in `backend/app/core/config.py` (pydantic-settings), overridable via env vars or `backend/.env` (gitignored). This includes financial constants (tax rates, transit dividend amounts, risk loadings), NIM/Nemotron endpoints and model names, RAG settings, and GPU/Monte Carlo flags.
+
+**Other endpoints:** `GET /api/v1/debug/{geocode,heritage,flood,development}?address=...` exercise individual data-source agents in isolation — useful for diagnosing which upstream dataset is failing. `POST /api/v1/pipeline/refresh` materializes CKAN data to Parquet/DuckDB (`services/pipeline/`).
+
+## Conventions
+
+- Backend: fully async services, pydantic schemas in `app/schemas/`, services constructed once and cached via `@lru_cache` in `get_report_service`. Data-source services return typed evidence objects (`services/data_sources/models.py`).
+- `down_payment_percent`, `mortgage_rate`, `amortization_years` have schema defaults — only `address`, `list_price`, `buyer_profile` are truly required.
+- Financial rates are hardcoded for 2026 (LTT brackets, property tax rate `0.00767311`, first-time rebate `$8,475`).
+
+## Docs
+
+`docs/` holds the product/architecture narrative; `docs/gpu-pipeline-upgrade/` documents the DuckDB/GPU/LLM/map upgrade phases; `docs/frontend-parameters.md` is the authoritative list of every parameter behind the displayed numbers.
